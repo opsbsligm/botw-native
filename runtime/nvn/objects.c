@@ -5,6 +5,7 @@
 #include "../framepace.h"
 #include "../game_sites.h"
 #include "../kernel.h"
+#include "../legacy_clock.h"
 #include "../perfmon.h"
 #include "nvn.h"
 
@@ -1199,7 +1200,7 @@ static void present_pace(int interval) {
     static uint64_t last;
     if (cap < 0) cap = getenv("SAVAGEWIND_FPS_CAP") ? atoi(getenv("SAVAGEWIND_FPS_CAP")) : 60;
     uint64_t period;
-    if (framepace_on()) period = framepace_period_ns();
+    if (gamelib_legacy_sdk7_profile() || framepace_on()) period = framepace_period_ns();
     else {
         period = 16666667ull * (uint64_t)(interval > 0 ? interval : 0);
         if (cap > 0 && period < 1000000000ull / (uint64_t)cap) period = 1000000000ull / (uint64_t)cap;
@@ -1211,6 +1212,7 @@ static void present_pace(int interval) {
     g_pace_sleep_ns += t1 - now;
     now = t1;
     last = last && now < target + period ? target : now;  // (steady cadence; after a long frame, start again)
+    if (gamelib_legacy_sdk7_profile()) sdk7_frame_presented(now);
     framepace_presented(last, last == target);
 }
 
