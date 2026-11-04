@@ -84,6 +84,7 @@ class Module:
         self.fde_starts = [a for a, _ in self.fdes]
         self.jt_cache = {}
         self.setjmps = self.setjmp_targets()
+        self.branch_conditions = {}
         self.sites, self.patches = {}, {}  # (main: tools/game_sites.py, tools/patches.py)
 
     def in_text(self, a):
@@ -488,7 +489,8 @@ class Module:
             elif k == 'b':
                 out.append('    ' + jump(ins.target))
             elif k == 'bcond':
-                out.append(f'    if ({ins.cond}) {{ {jump(ins.target)} }}')
+                condition = self.branch_conditions.get(a, ins.cond)
+                out.append(f'    if ({condition}) {{ {jump(ins.target)} }}')
             elif k == 'bl':
                 t = ins.target
                 if t in self.setjmps:
@@ -623,6 +625,9 @@ def generate(name, nso, base, outdir, opts, sites=None):
     if name == 'main':
         m.sites = sites if sites is not None else main_sites(m.nso, base, opts)[1]
         m.patches = patches.table(m.sites) if m.sites else {}
+        if opts.legacy_sdk7:
+            from legacy_clock import table
+            m.patches.update(table(m))
     starts = m.boundaries()
     hle = {}
     if opts.hle and os.path.exists(opts.hle):
@@ -667,6 +672,8 @@ def generate(name, nso, base, outdir, opts, sites=None):
                 break
         path = os.path.join(outdir, f'{name}_{nchunks:03d}.c')
         text = ['#include "cpu.h"\n' + ('#include "simd.h"\n' if m.lifter.sc else '')]
+        if name == 'main' and opts.legacy_sdk7:
+            text.append('#include \"legacy_clock.h\"\n')
         if any('rt_setjmp_slot(' in l for l in body):
             text += ['#include <setjmp.h>\njmp_buf *rt_setjmp_slot(Cpu *c, uint64_t gbuf);\n']
         text += [f'void {fname(r)}(Cpu *c);\n' for r in sorted(refs)]
