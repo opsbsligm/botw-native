@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -18,6 +19,34 @@ def module(name, relative):
 
 
 class Boundaries(unittest.TestCase):
+    def test_launcher_rejects_the_other_game_profile(self):
+        entry = module('profile_launch', 'packaging/run.py')
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            directory = Path(tmp)
+            (directory / 'bundle.json').write_text(json.dumps(dict(schema=1, version='1.4.3', files={})))
+            with patch.object(entry, 'ROOT', directory), patch.object(entry.sys, 'argv', ['run.py', '--verify']):
+                with self.assertRaises(SystemExit) as failure:
+                    entry.main()
+                self.assertEqual(failure.exception.code, 2)
+
+    def test_botw_launch_defaults_to_60_and_uses_its_own_font(self):
+        entry = module('botw_launch', 'packaging/run.py')
+        class LaunchCaptured(Exception):
+            pass
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            directory = Path(tmp)
+            (directory / 'bundle.json').write_text(json.dumps(dict(schema=1, version='1.6.0', files={})))
+            with patch.object(entry, 'ROOT', directory), patch.dict(os.environ,
+                    {'XDG_DATA_HOME': str(directory / 'state'), 'XDG_CACHE_HOME': str(directory / 'cache')}, clear=True), \
+                 patch.object(entry.os, 'chdir'), patch.object(entry.os, 'execvpe', side_effect=LaunchCaptured) as execute, \
+                 patch.object(entry.sys, 'argv', ['run.py']):
+                with self.assertRaises(LaunchCaptured):
+                    entry.main()
+                env = execute.call_args.args[2]
+                self.assertEqual(env['SAVAGEWIND_FPS'], '60')
+                self.assertEqual(env['SAVAGEWIND_FONT'], str(directory / 'wqy-microhei.ttc'))
+                self.assertFalse(any(name.startswith('TOTK_') for name in env))
+
     def test_build_outputs_cannot_overlap_checkout(self):
         entry = module('entry', 'build.py')
         for path in (ROOT, ROOT / 'out', ROOT.parent):
@@ -29,19 +58,19 @@ class Boundaries(unittest.TestCase):
         entry = module('launch', 'packaging/run.py')
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
             root = Path(tmp)
-            (root / 'ultratears').write_bytes(b'program')
-            files = {'ultratears': dict(size=7, sha256=hashlib.sha256(b'program').hexdigest())}
+            (root / 'savagewind').write_bytes(b'program')
+            files = {'savagewind': dict(size=7, sha256=hashlib.sha256(b'program').hexdigest())}
             with patch.object(entry, 'ROOT', root):
                 entry.checked_files({'files': files}, False)
-                (root / 'ultratears').write_bytes(b'changed')
+                (root / 'savagewind').write_bytes(b'changed')
                 with self.assertRaisesRegex(ValueError, 'checksum'):
                     entry.checked_files({'files': files}, False)
-                (root / 'ultratears').write_bytes(b'')
+                (root / 'savagewind').write_bytes(b'')
                 with self.assertRaisesRegex(ValueError, 'truncated'):
                     entry.checked_files({'files': files}, False)
                 for name in ('../escape', '/absolute'):
                     with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'manifest path'):
-                        entry.checked_files({'files': {name: files['ultratears']}}, True)
+                        entry.checked_files({'files': {name: files['savagewind']}}, True)
 
     def test_game_inputs_are_not_present_in_public_tree(self):
         for name in ('extracted', 'generated', 'data', 'game', 'Keys'):
