@@ -40,3 +40,5 @@ ENV NATIVE_DEPS=/opt/native-deps/build/linux/x86_64/deps
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-wqy-microhei && rm -rf /var/lib/apt/lists/*
