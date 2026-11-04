@@ -62,10 +62,14 @@ def assets(work, dump, jobs):
     if not movies:
         raise ValueError('Missing game movies')
     (work / 'validated-assets').mkdir(exist_ok=True)
+    fingerprints = {str(movie.relative_to(dump)): sha(movie) for movie in movies}
     for movie in movies:
         run(work, 'movie-' + movie.stem, [os.environ['NATIVE_DEPS'] + '/bin/ffmpeg',
             '-v', 'error', '-xerror', '-i', movie, '-f', 'null', '-'])
-    (work / 'validated-assets/movies.json').write_text(json.dumps({str(m.relative_to(dump)):sha(m) for m in movies}, indent=2))
+    after = sorted((dump / 'romfs/Movie').glob('*.webm'))
+    if after != movies or any(sha(movie) != fingerprints[str(movie.relative_to(dump))] for movie in movies):
+        raise ValueError('Movie input changed during decoder validation')
+    (work / 'validated-assets/movies.json').write_text(json.dumps(fingerprints, indent=2))
 
 
 def main():
@@ -78,6 +82,8 @@ def main():
     a.work = a.work.resolve()
     a.work.mkdir(parents=True, exist_ok=True)
     (a.work / 'home').mkdir(exist_ok=True)
+    from check_toolchain import main as check_toolchain
+    check_toolchain()
     if a.command == 'runtime':
         runtime(a.work, a.jobs)
         return
