@@ -12,7 +12,9 @@ float sdk7_frame_ratio(void) {
 unsigned sdk7_pad_tick(void) {
     return atomic_load_explicit(&pad_tick, memory_order_acquire);
 }
+extern void nd_cheats_apply_pending(void) __attribute__((weak));
 void sdk7_frame_presented(uint64_t now) {
+    if(nd_cheats_apply_pending) nd_cheats_apply_pending();
     static uint64_t previous;
     static double samples[5], phase;
     static unsigned count, next;

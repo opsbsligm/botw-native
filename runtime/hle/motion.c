@@ -33,6 +33,9 @@
 
 #include "../hle.h"
 #include "../motion.h"
+#ifdef __linux__
+#include "../deck_motion.h"
+#endif
 #include "../platform.h"
 #include "../settings.h"
 
@@ -114,6 +117,7 @@ static bool steep(double pitch) { return fabs(cos(pitch)) < 0.1736; }
 // ---- the source orientation (main thread writes, the game's controller thread reads)
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct {
+    bool native_source;
     bool sensors;           // the controller has a gyroscope and an accelerometer (turned on)
     bool started;           // its orientation was set from gravity (first accelerometer reading)
     Quat q;                 // its orientation
@@ -123,19 +127,41 @@ static struct {
     double gyro_sd;         // (the log: the gyroscope's spread just now, rad/s)
     double acc[3];          // last accelerometer reading (G, gravity's direction, Switch axes)
     double lin[3];          // ... beyond gravity
+    uint64_t received_ns;     // host monotonic freshness, independent of SDL sensor epoch
     uint64_t gyro_ts;       // last gyroscope reading's sensor time (ns)
     bool tilt_held;
     double tilt_pitch, tilt_roll;  // the mouse's tilt (radians)
     double sc_pitch, sc_roll, sc_pitch_speed, sc_yaw_speed;  // scripted (radians, radians per second)
 } g = {.q = {1, 0, 0, 0}, .acc = {0, 0, -1}};
 
-bool motion_has_sensors(void) { return g.sensors; }
+bool motion_has_sensors(void) {
+    pthread_mutex_lock(&g_lock);
+    bool on = g.sensors;
+    pthread_mutex_unlock(&g_lock);
+    return on;
+}
+
+void motion_native_live(int on) {
+    pthread_mutex_lock(&g_lock);
+    g.native_source = on != 0;
+    g.sensors = on != 0;
+    g.started = false;
+    g.gyro_ts = 0;
+    pthread_mutex_unlock(&g_lock);
+}
 
 void motion_pad_opened(SDL_Gamepad *pad) {
+#ifdef __linux__
+    nd_deck_motion_stop();
+    /* Read the actual Deck sensor device even when Steam exposes virtual buttons.
+       No mouse/right-stick gyro mapping is read or synthesised here. */
+    if (nd_deck_motion_start()) return;
+#endif
     bool gyro = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO), accel = SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL);
     bool on = gyro && accel && SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true) &&
               SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_ACCEL, true);
     pthread_mutex_lock(&g_lock);
+    g.native_source = false;
     g.sensors = on, g.started = false, g.gyro_ts = 0;
     memset(g.bias, 0, sizeof g.bias);
     memset(g.mean, 0, sizeof g.mean);
@@ -152,6 +178,9 @@ void motion_pad_opened(SDL_Gamepad *pad) {
 }
 
 void motion_pad_closed(void) {
+#ifdef __linux__
+    nd_deck_motion_stop();
+#endif
     pthread_mutex_lock(&g_lock);
     g.sensors = g.started = false;
     pthread_mutex_unlock(&g_lock);
@@ -204,10 +233,35 @@ static void fuse_gyro(const double raw[3], double dt) {
     g.q = qnorm(qmul(g.q, (Quat){cos(h), w[0] * s, w[1] * s, w[2] * s}));
 }
 
+/* Both sources feed the same fusion in Switch coordinates, with monotonic ns.
+ * Invalid or stale samples cannot continue rotating the camera. */
+void motion_native_sample(const double acc[3], const double gyro[3], uint64_t ts) {
+    for (unsigned i = 0; i < 3; i++)
+        if (!isfinite(acc[i]) || !isfinite(gyro[i])) return;
+    pthread_mutex_lock(&g_lock);
+    memcpy(g.acc, acc, sizeof g.acc);
+    double an = sqrt(acc[0]*acc[0] + acc[1]*acc[1] + acc[2]*acc[2]);
+    if (!g.started && an > 0.5) {
+        double v = -acc[1] / an;
+        g.q = euler_quat(0, asin(v > 1 ? 1 : v < -1 ? -1 : v), atan2(acc[0], -acc[2]));
+        memset(g.bias, 0, sizeof g.bias);
+        memset(g.mean, 0, sizeof g.mean);
+        memset(g.var, 0, sizeof g.var);
+        g.acc_mean = 1; g.acc_var = 0; g.started = true;
+    }
+    double dt = g.gyro_ts && ts > g.gyro_ts ? (ts-g.gyro_ts)*1e-9 : 0;
+    g.gyro_ts = ts;
+    g.received_ns = plat_now_ns();
+    if (g.started && dt > 0 && dt < 0.1) fuse_gyro(gyro, dt);
+    Mat m; quat_mat(g.q, m);
+    for (unsigned i = 0; i < 3; i++) g.lin[i] = acc[i] + m[2][i];
+    pthread_mutex_unlock(&g_lock);
+}
+
 void motion_sensor_event(const SDL_Event *e) {
     const float *d = e->gsensor.data;
     pthread_mutex_lock(&g_lock);
-    if (!g.sensors) {
+    if (!g.sensors || g.native_source) {
         pthread_mutex_unlock(&g_lock);
         return;
     }
@@ -228,6 +282,7 @@ void motion_sensor_event(const SDL_Event *e) {
         uint64_t ts = e->gsensor.sensor_timestamp ? e->gsensor.sensor_timestamp : e->gsensor.timestamp;
         double dt = g.gyro_ts && ts > g.gyro_ts ? (double)(ts - g.gyro_ts) / 1e9 : 0;
         g.gyro_ts = ts;
+    g.received_ns = plat_now_ns();
         if (dt > 0 && dt < 0.1) fuse_gyro(raw, dt);
     }
     pthread_mutex_unlock(&g_lock);
@@ -301,7 +356,7 @@ static int source(double dt, Mat m) {
     if (s.sc_pitch > PITCH_MAX) s.sc_pitch = PITCH_MAX;
     if (s.sc_pitch < -PITCH_MAX) s.sc_pitch = -PITCH_MAX;
     bool virt = g.tilt_held || g.tilt_pitch || g.tilt_roll || g.sc_pitch || g.sc_roll || s.sc_yaw || s.sc_pitch;
-    if (g.sensors && g.started && !virt) {
+    if (g.sensors && g.started && plat_now_ns() >= g.received_ns && plat_now_ns() - g.received_ns < 250000000ull && !virt) {
         quat_mat(g.q, m);
         return 1;
     }

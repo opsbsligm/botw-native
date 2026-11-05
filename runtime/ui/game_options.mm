@@ -34,6 +34,7 @@ extern "C" {
 #include "../game_sites.h"
 #include "../nvn/output_scale.h"
 #include "../settings.h"
+#include "../framepace.h"
 #include "../color_grade.h"
 #include "../window_size.h"
 void rt_request_reboot(int kind);           // runtime/main.c (1: start the game again)
@@ -150,7 +151,7 @@ const char *const k_icons[] = {"Automatic", "Keyboard", "Xbox", "PlayStation", "
 constexpr int k_fps[] = FPS_CHOICES;  // frame rate (0: Off, no limit)
 const char *const k_vsync[VSYNC_COUNT] = {"On", "Fast", "Adaptive", "Off"};  // (settings.h VSYNC_*)
 const char *const k_hdr[HDR_COUNT] = {"Automatic", "On", "Off"};               // (settings.h HDR_*)
-constexpr int FPS_DEFAULT_INDEX = 2;
+constexpr int FPS_DEFAULT_INDEX = [] { for(int i=0;i<(int)(sizeof k_fps/sizeof *k_fps);i++) if(k_fps[i]==FPS_DEFAULT) return i; return -1; }();
 static_assert(k_fps[FPS_DEFAULT_INDEX] == FPS_DEFAULT);
 constexpr int k_sens[] = {10, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 600, 800, 1000};  // mouse sensitivity, %
 constexpr int SENS_DEFAULT = 9;  // (300%: MOUSE_SENS_DEFAULT)
@@ -310,10 +311,10 @@ void build_items(void) {
                       [](const Item &) { return N(k_fps); }, fps_label,
                       [](const Item &) {
                           for (int i = 0; i < N(k_fps); i++)
-                              if (k_fps[i] == g_settings.fps_limit) return i;
+                              if (k_fps[i] == framepace_configured_limit()) return i;
                           return FPS_DEFAULT_INDEX;
                       },
-                      [](const Item &, int x) { g_settings.fps_limit = k_fps[x]; }, FPS_DEFAULT_INDEX);
+                      [](const Item &, int x) { framepace_set_user_limit(k_fps[x]); }, FPS_DEFAULT_INDEX);
     fps.desc_fn = [](const Item &) {  // (one line)
         static char buf[256];
         int hz = (int)lroundf(winsize_refresh_rate());

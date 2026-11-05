@@ -144,9 +144,9 @@ def main():
         backup_saves(data / 'save', data / 'native-save-backups')
         env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / 'lib'))
         env.update(SAVAGEWIND_DATA_ROOT=str(data), SAVAGEWIND_FONT=str(ROOT / 'wqy-microhei.ttc'))
-        env.setdefault('SAVAGEWIND_FPS', '60')
         env.setdefault('SAVAGEWIND_FRAMEPACE', '1')
-        cmd = [str(ROOT / 'savagewind'), '--play', str(ROOT / 'data'), *game_args]
+        env['NATIVE_SESSION_FD'] = str(lock.fileno())
+        cmd = [sys.executable, str(ROOT / 'motion_session.py'), str(ROOT / 'game.sh'), *game_args]
         # exec preserves the session lock and gives Steam direct signal/process ownership.
         os.set_inheritable(lock.fileno(), True)
         os.chdir(data)

@@ -37,8 +37,16 @@ def sha(path):
 
 
 def make(work, label, jobs, *args):
-    run(work, label, ['make', '-j' + str(jobs), 'B=' + str(work / 'game'),
+    from compiler_cache import prepare,complete,guest_abi
+    out=work/'game';out.mkdir(exist_ok=True)
+    current=dict(host=source_stamp(),guest=guest_abi(ROOT,[
+        'runtime/cpu.h','runtime/simd.h','runtime/simd_fp.h','runtime/simd_softfma.h',
+        'runtime/legacy_clock.h','runtime/gamelib.h','Makefile']))
+    host=[p for d in ('rt','imgui','ffx') for p in (out/d).rglob('*.o')]
+    state=prepare(out,current,host,list((out/'obj').rglob('*.o')))
+    run(work, label, ['make', '-j' + str(jobs), 'B=' + str(out),
         'GEN=' + str(work / 'generated'), 'DEPS=' + os.environ['NATIVE_DEPS'], *args])
+    complete(state,current)
 
 
 def runtime(work, jobs):

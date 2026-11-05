@@ -4,7 +4,14 @@
 // BOTW, controller by position, Switch A = east). Keyboard bindings can name mouse buttons; the mouse's motion turns
 // the camera (the right stick) while the cursor is held in the window, or tilts the controller while the tilt key is
 // held (motion controls: runtime/hle/motion.c, which also takes the controller's gyroscope and accelerometer).
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <SDL3/SDL.h>
+#ifdef __linux__
+#include <sys/uio.h>
+#include <unistd.h>
+#endif
 #include <ctype.h>
 #include <math.h>
 #include <stdatomic.h>
@@ -18,6 +25,8 @@
 #include "../input_bind.h"
 #include "../motion.h"
 #include "../vibration.h"
+#include "../menu_confirm.h"
+#include "../game_sites.h"
 
 enum {
     BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
@@ -27,6 +36,12 @@ enum {
 _Static_assert(BTN_DOWN == BIND_DOWN && BTN_ZL == BIND_ZL, "bindings follow the button bits");
 
 static _Atomic uint64_t key_buttons, pad_buttons;
+static _Atomic uint64_t pad_other, pad_east_actions, pad_south_actions;
+static _Atomic unsigned pad_faces;
+static pthread_mutex_t confirm_lock = PTHREAD_MUTEX_INITIALIZER;
+static NdMenuConfirm confirm_state;
+static _Atomic bool confirm_active;
+bool input_menu_confirm_active(void) { return confirm_active; }
 static _Atomic int32_t key_lx, key_ly, key_rx, key_ry, pad_lx, pad_ly, pad_rx, pad_ry;
 static uint8_t keys_down[SDL_SCANCODE_COUNT];
 static uint8_t mouse_down[8];  // SDL_BUTTON_LEFT .. X2 (keyboard bindings BIND_MOUSE + button)
@@ -41,6 +56,7 @@ static bool host_test;  // (then a real controller is left out: the player's own
 static _Atomic int last_device;  // DEVICE_*: what the player used last
 static bool tilt_held;  // the tilt key: the mouse tilts the controller instead of turning the camera
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
+extern uint32_t menu_suppressed_pad_buttons(void);
 
 static int held_key(int sc) {
     if (sc > BIND_MOUSE && sc <= BIND_MOUSE_LAST) return mouse_down[sc - BIND_MOUSE];
@@ -83,10 +99,22 @@ static void recompute_pad(void) {
         if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000) host |= 1u << PADB_LTRIGGER;
         if (SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000) host |= 1u << PADB_RTRIGGER;
     }
+    host &= ~menu_suppressed_pad_buttons();
     uint64_t b = 0;
     for (int i = 0; i < BIND_PAD_COUNT; i++)
         if (g_bind_pad[i] >= 0 && g_bind_pad[i] < PADB_HOST_COUNT && (host >> g_bind_pad[i] & 1)) b |= 1ull << i;
     pad_buttons = b;
+    uint64_t other=0, east=0, south=0;
+    for (int i=0;i<BIND_PAD_COUNT;i++) {
+        int bind=g_bind_pad[i];
+        if (bind==SDL_GAMEPAD_BUTTON_EAST) east |= 1ull<<i;
+        else if (bind==SDL_GAMEPAD_BUTTON_SOUTH) south |= 1ull<<i;
+        else if (bind>=0 && bind<PADB_HOST_COUNT && (host>>bind&1)) other |= 1ull<<i;
+    }
+    pthread_mutex_lock(&confirm_lock);
+    pad_other=other; pad_east_actions=east; pad_south_actions=south;
+    pad_faces=((host>>SDL_GAMEPAD_BUTTON_EAST)&1) | (((host>>SDL_GAMEPAD_BUTTON_SOUTH)&1)<<1);
+    pthread_mutex_unlock(&confirm_lock);
     if (!pad || host_test) { pad_lx = test_lx, pad_ly = test_ly, pad_rx = pad_ry = 0; return; }
     dead_zone(&pad_lx, &pad_ly, SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX),
               -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY), g_settings.stick_deadzone[0]);
@@ -635,8 +663,39 @@ void input_frame(uint64_t frame) {
     motion_script(tilt_p, tilt_r, turn_p, turn_y);
 }
 
+RT_ON_RESET(menu_confirm_reset) {
+    pthread_mutex_lock(&confirm_lock);
+    confirm_state=(NdMenuConfirm){0}; confirm_active=false;
+    pthread_mutex_unlock(&confirm_lock);
+}
+
+#ifdef __linux__
+static bool menu_read(void *unused, uint64_t addr, void *out, size_t size) {
+    (void)unused;
+    struct iovec local={out,size},remote={(void *)(uintptr_t)addr,size};
+    return process_vm_readv(getpid(),&local,1,&remote,1,0)==(ssize_t)size;
+}
+#endif
+/* Called by game polling and movie wakeup. No camera/time heuristics, no guest writes.
+   Protect the transition latch if a second polling thread asks for input. */
+static uint64_t gamepad_buttons_now(void) {
+#ifdef __linux__
+    const char *opt=getenv("SAVAGEWIND_MENU_CONFIRM");
+    if (gamelib_legacy_sdk7_profile() && (!opt || strcmp(opt,"0"))) {
+        pthread_mutex_lock(&confirm_lock);
+        bool active=nd_botw_menu_context(menu_read,NULL);
+        confirm_active=active;
+        uint64_t b=pad_other | nd_menu_confirm(&confirm_state,active,pad_faces,pad_east_actions,pad_south_actions);
+        pthread_mutex_unlock(&confirm_lock);
+        return b;
+    }
+#endif
+    confirm_active=false;
+    return pad_buttons;
+}
+
 // Buttons held right now (keyboard, gamepad, test script), independent of whether the game polls (movies).
-uint64_t input_buttons_now(void) { return (menu_input_captured() ? 0 : key_buttons | pad_buttons) | script_buttons; }
+uint64_t input_buttons_now(void) { return (menu_input_captured() ? 0 : key_buttons | gamepad_buttons_now()) | script_buttons; }
 
 static int32_t clamp_axis(int32_t v) { return v > 32767 ? 32767 : v < -32767 ? -32767 : v; }
 
@@ -660,7 +719,7 @@ static void fill_state(Cpu *c) {
         LOG("[input] watching controller object %llx\n", c->x[1] - 8);
     }
     bool menu = menu_input_captured();  // the overlay menu / name entry has the controls (typing there isn't for the game)
-    uint64_t b = menu ? script_buttons : key_buttons | pad_buttons | script_buttons;
+    uint64_t b = menu ? script_buttons : key_buttons | gamepad_buttons_now() | script_buttons;
     {   // injected Plus: held for ~10 presented frames (the game polls several times per frame)
         extern uint64_t renderer_present_count(void);
         static uint64_t until;
