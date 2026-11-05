@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/ly05010419/MacNativeGames",
+  "commit": "f1d00772df1ac3230268f3124bdeb6b7cc81a61c",
+  "path": "games/totk/runtime/game_patches_botw.c",
+  "source_sha256": "9cb928ff2ae019486ac517bd9b641e7e6f2388baecac7d10d7cd09dd27823802",
+  "guarded_instructions": 80,
+  "hardware_validated": false
+}
