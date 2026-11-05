@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/Revivedx/SavageWindRecomp",
+  "commit": "4249c880bc6b09ad0207fc3f6e7595346f08d232",
+  "license": "MIT",
+  "game_version": "1.6.0",
+  "original_port_repository": "https://gitlab.example.com:8445/codex/nativedeck",
+  "original_port_commit": "dad29799121a99940f0cb2a2aa9b8759e358de59",
+  "game_content_included": false
+}
