@@ -20,7 +20,7 @@ class LegacyClock(unittest.TestCase):
             clock.sdk7_pad_tick.restype = ctypes.c_uint
             now = 1_000_000_000
             clock.sdk7_frame_presented(now)
-            for hz in (30, 60, 90, 120, 60, 30):
+            for hz in (30, 40, 45, 60, 90, 120, 60, 30):
                 step = round(1e9 / hz)
                 for _ in range(10):
                     now += step

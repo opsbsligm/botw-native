@@ -521,9 +521,18 @@ static int resolve_kind(void) {
     return f == 1 ? ICONS_XBOX : f == 2 ? ICONS_PLAYSTATION : ICONS_NINTENDO;
 }
 
+static int button_binding(int slot) {
+    if (input_menu_confirm_active()) {
+        if (slot==BIND_A) return SDL_GAMEPAD_BUTTON_SOUTH;
+        if (slot==BIND_B) return SDL_GAMEPAD_BUTTON_EAST;
+    }
+    return g_bind_pad[slot];
+}
+
 uint32_t glyphs_generation(void) {
     int k = resolve_kind();
     uint32_t h = 2166136261u ^ (uint32_t)k;
+    if (k!=ICONS_KEYBOARD) h=(h ^ (unsigned)input_menu_confirm_active())*16777619u;
     if (k == ICONS_KEYBOARD) {
         for (int i = 0; i < BIND_KEY_COUNT; i++) h = (h ^ (uint16_t)g_bind_key[i]) * 16777619u;
         h = (h ^ g_settings.mouse_camera) * 16777619u;
@@ -543,7 +552,7 @@ static bool draw_glyph(Canvas *c, Box b, int code, int kind, int *copy) {
     bool ps = kind == ICONS_PLAYSTATION;
     if (kind == ICONS_NINTENDO) {  // the game's glyphs, following the controller bindings
         int host = -1;
-        if (m.kind == G_BUTTON) host = g_bind_pad[m.arg];
+        if (m.kind == G_BUTTON) host = button_binding(m.arg);
         else if (m.kind == G_DPAD && !(m.arg & (m.arg - 1))) host = g_bind_pad[k_dpad_slot[dir_index(m.arg)]];
         int want = host >= 0 ? nintendo_code(host) : 0;
         if (want && want != code) *copy = want;
@@ -573,7 +582,7 @@ static bool draw_glyph(Canvas *c, Box b, int code, int kind, int *copy) {
     }
     // Xbox / PlayStation: buttons through the bindings; the sticks keep the game's (L / R)
     switch (m.kind) {
-    case G_BUTTON: pad_button(c, b, g_bind_pad[m.arg], ps); return true;
+    case G_BUTTON: pad_button(c, b, button_binding(m.arg), ps); return true;
     case G_DPAD:
         if (!(m.arg & (m.arg - 1))) {
             int host = g_bind_pad[k_dpad_slot[dir_index(m.arg)]];
