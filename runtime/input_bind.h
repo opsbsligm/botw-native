@@ -68,6 +68,9 @@ void bind_settings_save(FILE *f);
 int bind_slot_from_name(const char *name);
 int bind_pad_from_name(const char *name);
 
+// Exact-profile game menu context, shared with prompt drawing; no input mapping side effects.
+bool input_menu_confirm_active(void);
+
 #ifdef __cplusplus
 }
 #endif
