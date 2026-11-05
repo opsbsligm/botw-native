@@ -23,7 +23,7 @@ python3 build.py build --dump /mnt/my-dump --work /mnt/botw-build
 
 ## 运行状态
 
-SDK7 使用独立的 1.6.0 实时帧时序：校验 80 个指令身份后生成 VFR、界面、物理、按键重复和声音计时适配；默认 60 帧上限。不会启用较新版本依赖其他地址表的兼容路径。软件时钟与指令门禁验证和实机体验分开验收；本次全量重建尚在验证中。
+SDK7 使用独立的 1.6.0 实时帧时序：校验 80 个指令身份后生成 VFR、界面、物理、按键重复和声音计时适配；默认 60 帧上限。不会启用较新版本依赖其他地址表的兼容路径。软件时钟与指令门禁验证和实机体验分开验收；完整代码生成与编译已经通过，完整资源打包仍需健康的输入资源。
 
 运行器校验程序和依赖摘要、检查资源尺寸，`--verify` 校验全部文件内容。启动前对现有存档做内容去重、逐文件校验和原子快照备份，源文件变化则中止。存档位于 XDG 用户数据目录，缓存单独保存在 XDG 缓存目录；两个游戏互不覆盖。六轴方向、实体按键、不同机器上的游戏运行和性能由实际玩家验收；`hardware_validated=false` 针对本仓本次重建产物。
 
@@ -36,5 +36,7 @@ python3 build.py runtime --work /mnt/botw-public-check
 ```
 
 这个命令编译公共运行时，CI 也执行它；它不等于完整游戏构建。GitLab 的 MR 流程要求测试、安全扫描和指定审查者通过后合并。游戏资源不进入 CI。分享源码请克隆本仓库，或用 `python3 tools/export_source.py --output /mnt/botw-source.tar.gz` 导出含校验清单的源码包；解压后无需 `.git` 即可构建。个人生成的 `package/` 包含游戏派生内容，与可分享源码包分开。
+
+验证范围与已知限制见 [docs/validation.md](docs/validation.md)。
 
 依赖与许可见 [NOTICE.md](NOTICE.md)、[UPSTREAM.json](UPSTREAM.json) 和 [docs/build.md](docs/build.md)。
