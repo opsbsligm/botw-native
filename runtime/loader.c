@@ -6,6 +6,7 @@
 #include "gamelib.h"
 #include "lz4.h"
 #include "rt.h"
+#include "native_cheats.h"
 
 Module g_modules[MAX_MODULES];
 int g_nmodules;
@@ -86,6 +87,11 @@ static void load_nso(Module *m, const char *path, const GameLibModule *lm) {
     m->text_off = seg[0][1]; m->text_size = seg[0][2];
     m->ro_off = seg[1][1];   m->ro_size = seg[1][2];
     m->data_off = seg[2][1]; m->data_size = seg[2][2] + bss;
+    if (!strcmp(m->name,"main")) {
+        nd_cheats_bind("botw-1.6.0",id,base,base+m->data_off,m->data_size);
+        const char *cheats=getenv("NATIVE_CHEATS_FILE");
+        nd_cheats_load(cheats && *cheats ? cheats : "native-cheats.txt");
+    }
 
     uint32_t mod0 = *(uint32_t *)(base + 4);
     uint64_t mod = base + mod0;

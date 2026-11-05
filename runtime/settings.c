@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "hle.h"
 #include "input_bind.h"
@@ -20,6 +21,7 @@ static const char *settings_file(void) {
 }
 
 Settings g_settings = {
+    .control_bar_anchor = 4,
     .fullscreen = false,
     .volume = 1.0f,
     .reverb = true,
@@ -162,6 +164,7 @@ void settings_load(void) {
             for (int i = 1; i < g_nvoice_languages; i++)
                 if (!strcmp(val, g_voice_languages[i].folder)) g_settings.voice_language = i;
         }
+        else if (!strcmp(key, "control_bar_anchor")) { int a=atoi(val); if(a>=0 && a<8) g_settings.control_bar_anchor=a; }
         else if (!strcmp(key, "menu_tip_seen")) g_settings.menu_tip_seen = atoi(val) != 0, tip_key = true;
         else bind_settings_load(key, val);  // bind_pad_* / bind_key_*: runtime/hle/bindings.c
     }
@@ -215,7 +218,12 @@ void settings_load(void) {
 }
 
 void settings_save(void) {
-    FILE *f = fopen(SETTINGS_FILE, "w");
+    char temporary[4096];
+    int n = snprintf(temporary, sizeof temporary, "%s.new-XXXXXX", SETTINGS_FILE);
+    if (n < 0 || (size_t)n >= sizeof temporary) return;
+    int fd = mkstemp(temporary);
+    FILE *f = fd < 0 ? NULL : fdopen(fd, "w");
+    if (!f && fd >= 0) { close(fd); unlink(temporary); }
     if (!f) { LOG("[settings] cannot write %s\n", SETTINGS_FILE); return; }
     fprintf(f, "# Savage Wind settings (edited from the in-game menu: F1, Esc, or Minus+Plus on a controller)\n");
     fprintf(f, "settings_version = %d\n", SETTINGS_VERSION);
@@ -276,6 +284,13 @@ void settings_save(void) {
     fprintf(f, "text_language = %s\n", tl > 0 && tl < g_ntext_languages ? g_text_languages[tl].folder : "auto");
     fprintf(f, "voice_language = %s\n", vl > 0 && vl < g_nvoice_languages ? g_voice_languages[vl].folder : "text");
     fprintf(f, "menu_tip_seen = %d\n", g_settings.menu_tip_seen);
+    fprintf(f, "control_bar_anchor = %d\n", g_settings.control_bar_anchor);
     bind_settings_save(f);
-    fclose(f);
+    bool ok = !ferror(f);
+    if (fflush(f) || fsync(fileno(f))) ok = false;
+    if (fclose(f)) ok = false;
+    if (!ok || rename(temporary, SETTINGS_FILE)) {
+        unlink(temporary);
+        LOG("[settings] write failed; previous settings retained\n");
+    }
 }

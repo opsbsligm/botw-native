@@ -29,7 +29,7 @@ class Boundaries(unittest.TestCase):
                     entry.main()
                 self.assertEqual(failure.exception.code, 2)
 
-    def test_botw_launch_defaults_to_60_and_uses_its_own_font(self):
+    def test_botw_launch_preserves_setting_frame_cap_and_uses_its_own_font(self):
         entry = module('botw_launch', 'packaging/run.py')
         class LaunchCaptured(Exception):
             pass
@@ -43,7 +43,8 @@ class Boundaries(unittest.TestCase):
                 with self.assertRaises(LaunchCaptured):
                     entry.main()
                 env = execute.call_args.args[2]
-                self.assertEqual(env['SAVAGEWIND_FPS'], '60')
+                self.assertNotIn('SAVAGEWIND_FPS', env)
+                self.assertEqual(execute.call_args.args[1][1], str(directory/'motion_session.py'))
                 self.assertEqual(env['SAVAGEWIND_FONT'], str(directory / 'wqy-microhei.ttc'))
                 self.assertFalse(any(name.startswith('TOTK_') for name in env))
 

@@ -114,9 +114,9 @@ def main():
             copyright = Path('/usr/share/doc') / package / 'copyright'
             if copyright.is_file():
                 shutil.copy2(copyright, staging / 'licenses' / (package + '-copyright.txt'))
-        for rel in ('run.py', 'run.sh'):
+        for rel in ('run.py', 'run.sh', 'game.sh', 'motion_session.py'):
             shutil.copy2(ROOT / 'packaging' / rel, staging / rel)
-        for rel in ('run.sh', executable):
+        for rel in ('run.sh', 'game.sh', executable):
             (staging / rel).chmod(0o755)
         for name in ('LICENSE', 'NOTICE.md', 'UPSTREAM.json'):
             shutil.copy2(ROOT / name, staging / name)
