@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifdef __linux__
 /* Read-only six-axis fallback for Steam's sensorless virtual Deck gamepad.
  * Never sends a HID feature report, grabs input, or remaps buttons. */
