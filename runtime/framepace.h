@@ -6,6 +6,9 @@
 // The frame rate the runtime paces to now, frames per second (0: no limit): the setting (Video > Frame rate), 30
 // in the menus and while a movie plays.
 int framepace_target(void);
+// Initial environment override, then the player's explicit application choice.
+int framepace_configured_limit(void);
+void framepace_set_user_limit(int fps);
 // The time between presents for it, nanoseconds (no limit: 1/300 s).
 uint64_t framepace_period_ns(void);
 // false: the game paces itself and keeps its own clock (SAVAGEWIND_FRAMEPACE=0)

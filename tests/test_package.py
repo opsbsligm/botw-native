@@ -26,7 +26,7 @@ class PackageTests(unittest.TestCase):
                 (root / name).write_text('notice')
             (root / 'UPSTREAM.json').write_text(json.dumps({'game_version': '1.6.0'}))
             (root / 'third_party/fonts/a/OFL.txt').write_text('retain this notice')
-            for name in ('run.py', 'run.sh', 'game.sh'):
+            for name in ('run.py', 'run.sh', 'game.sh', 'motion_session.py'):
                 (root / 'packaging' / name).write_text('launcher')
             for name in ('savagewind', 'swgame.so', 'swgame.so.id'):
                 (work / 'game' / name).write_bytes(b'compiled test fixture')

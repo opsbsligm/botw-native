@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "../game_sites.h"
 #include "../hle.h"
@@ -106,17 +107,30 @@ bool framepace_title_ui(void) { return screen_up(1) || screen_up(0x38); }
 bool framepace_loading_ui(void) { return screen_up(0x55); }
 
 // (pause state 2: the pause menu's pages and the map; 4 is the quick menus over the game)
-bool framepace_menu_ui(void) { return *(uint32_t *)(uintptr_t)PAUSE_STATE == 2; }
+bool framepace_menu_ui(void) { return g_site.pause_state && *(uint32_t *)(uintptr_t)PAUSE_STATE == 2; }
 bool framepace_paused(void) { return in_menu(); }
 
+static _Atomic int initial_limit=-2, user_limit_changed;
+int framepace_configured_limit(void) {
+    if(atomic_load(&user_limit_changed)) return __atomic_load_n(&g_settings.fps_limit,__ATOMIC_RELAXED);
+    int forced=atomic_load(&initial_limit);
+    if(forced==-2) {forced=env_int("SAVAGEWIND_FPS",-1);atomic_store(&initial_limit,forced);}
+    return forced>=0 ? forced : __atomic_load_n(&g_settings.fps_limit,__ATOMIC_RELAXED);
+}
+void framepace_set_user_limit(int fps) {
+    static const int allowed[]=FPS_CHOICES;
+    for(unsigned i=0;i<sizeof allowed/sizeof *allowed;i++) if(fps==allowed[i]) {
+        __atomic_store_n(&g_settings.fps_limit,fps,__ATOMIC_RELAXED);
+        atomic_store(&user_limit_changed,1);return;
+    }
+}
 int framepace_target(void) {
-    static int forced = -2, movie = -2, menu = -2, event = -2;
-    if (forced == -2) forced = env_int("SAVAGEWIND_FPS", -1);
+    static int movie = -2, menu = -2, event = -2;
     extern bool movie_paced(void);
     if (movie == -2) movie = env_int("SAVAGEWIND_MOVIE_FPS", movie_paced() ? 0 : -1);  // (-1: the movie's own frame rate)
     if (menu == -2) menu = env_int("SAVAGEWIND_MENU_FPS", 0);
     if (event == -2) event = env_int("SAVAGEWIND_EVENT_FPS", 0);
-    int fps = forced >= 0 ? forced : g_settings.fps_limit;
+    int fps = framepace_configured_limit();
     if (fps < 0) fps = FPS_DEFAULT;
     if (movie != 0 && __atomic_load_n(&g_movie_playing, __ATOMIC_RELAXED) > 0) {
         int cap = movie > 0 ? movie : g_movie_fps;

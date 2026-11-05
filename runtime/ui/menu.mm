@@ -27,12 +27,14 @@ extern "C" bool vk_imgui_backend_init(void);  // runtime/nvn/vulkan/imgui_glue.c
 extern "C" {
 #include "../hle.h"
 #include "../settings.h"
+#include "../framepace.h"
 #include "../color_grade.h"
 #include "../window_size.h"
 extern "C" {
 #include "../language.h"
 }
 #include "menu.h"
+#include "control_bar.h"
 void input_reset(void);
 void controls_bindings_draw(float scale);  // controls_ui.mm
 #include "../input_bind.h"
@@ -42,6 +44,9 @@ void controls_bindings_draw(float scale);  // controls_ui.mm
 
 // ------------------------------------------------------------------ state shared with the main thread
 static std::atomic<bool> g_open{false};
+static std::atomic<uint32_t> held_pad_buttons{0}, suppressed_pad_buttons{0};
+extern "C" void menu_absorb_pad_buttons(void) {suppressed_pad_buttons.fetch_or(held_pad_buttons.load());}
+extern "C" uint32_t menu_suppressed_pad_buttons(void) {return suppressed_pad_buttons.load();}
 static std::atomic<bool> g_text_busy{false};  // a text field / the on-screen keyboard has the keys (render thread: ui_text_busy)
 static std::atomic<bool> g_want_window_apply{false};  // fullscreen or the window size changed
 // (also from the game's Options screen, game_options.mm)
@@ -61,16 +66,19 @@ struct QEvent {
 };
 static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
 static std::vector<QEvent> q_events;
+static std::atomic<bool> q_reset{false};
 static float g_pixel_density = 1;
 
 static void push(const QEvent &e) {
     pthread_mutex_lock(&q_lock);
-    q_events.push_back(e);
+    if(q_events.size()<512) q_events.push_back(e);
+    else {q_events.clear();q_reset=true;}
     pthread_mutex_unlock(&q_lock);
 }
 
-bool menu_is_open(void) { return g_open.load(); }
+bool menu_is_open(void) { return g_open.load() || control_bar_is_open(); }
 static void set_open(bool open);
+extern "C" void menu_control_open_full(void) { set_open(true); }
 extern "C" void menu_test_open(void) {
     set_open(true);
     if (getenv("SAVAGEWIND_MENU_TAB")) { extern int g_tab_request_ext; g_tab_request_ext = atoi(getenv("SAVAGEWIND_MENU_TAB")); }
@@ -79,6 +87,7 @@ extern "C" void menu_test_open(void) {
 void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
+    menu_absorb_pad_buttons();
     g_open.store(open);
     input_reset();  // nothing held while the menu had focus leaks into the game
     bind_capture_cancel();
@@ -123,11 +132,11 @@ static ImGuiKey key_from_scancode(SDL_Scancode sc) {
     }
 }
 
-// Nintendo layout: the right face button (A) confirms, the bottom one (B) goes back.
+// Application UI: physical Deck A (south) confirms, B (east) goes back. Gameplay bindings are unchanged.
 static ImGuiKey key_from_pad(Uint8 b) {
     switch (b) {
-    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceDown;   // activate
-    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceRight; // cancel / back
+    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceDown;   // activate
+    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceRight; // cancel / back
     case SDL_GAMEPAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
     case SDL_GAMEPAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;
@@ -159,7 +168,7 @@ extern "C" void menu_size_list_open(void) {
     input_reset();
     g_sizes = true;
 }
-static bool capturing() { return g_open.load() || g_kbd.load() == 1 || g_sizes.load(); }
+static bool capturing() { return g_open.load() || control_bar_is_open() || g_kbd.load() == 1 || g_sizes.load(); }
 // The game gets no input while this is true (runtime/hle/input.c): menu or name entry up, or a binding capture begun
 // from the game's Options screen.
 extern "C" bool menu_input_captured(void) {
@@ -170,13 +179,34 @@ extern "C" bool menu_input_captured(void) {
 // longer open this menu (SAVAGEWIND_OVERLAY=1 brings it back). Esc frees the mouse cursor instead, a click in the
 // window holds it again (runtime/hle/input.c).
 static bool overlay_enabled(void) {
-    static const bool on = getenv("SAVAGEWIND_OVERLAY") && *getenv("SAVAGEWIND_OVERLAY") != '0';
+    static const char *option = getenv("SAVAGEWIND_OVERLAY");
+    static const bool on = !option || *option != '0';
     return on;
 }
 static std::atomic<bool> g_cursor_free{false};
 extern "C" bool menu_cursor_free(void) { return g_cursor_free.load(); }
 
 bool menu_handle_event(const SDL_Event *e) {
+    // A close press can outlive the panel. Deliver releases to ImGui even while
+    // collapsed, without consuming them from gameplay or leaving a stuck key.
+    if(!capturing()) {
+        if(e->type==SDL_EVENT_KEY_UP || e->type==SDL_EVENT_GAMEPAD_BUTTON_UP) {
+            ImGuiKey k=e->type==SDL_EVENT_KEY_UP?key_from_scancode(e->key.scancode):key_from_pad(e->gbutton.button);
+            if(k!=ImGuiKey_None) {QEvent q={};q.kind=QEvent::KEY;q.key=k;q.down=false;push(q);}
+        } else if(e->type==SDL_EVENT_MOUSE_BUTTON_UP && e->button.button==SDL_BUTTON_LEFT) {
+            QEvent q={};q.kind=QEvent::MOUSE_BUTTON;q.button=0;q.down=false;push(q);
+        }
+    }
+    if(e->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN || e->type==SDL_EVENT_GAMEPAD_BUTTON_UP) {
+        if(e->gbutton.button<32) {
+            uint32_t bit=1u<<e->gbutton.button;
+            if(e->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN) held_pad_buttons.fetch_or(bit);
+            else {held_pad_buttons.fetch_and(~bit);suppressed_pad_buttons.fetch_and(~bit);}
+            if(capturing()) menu_absorb_pad_buttons();
+        }
+    } else if(e->type==SDL_EVENT_GAMEPAD_REMOVED || e->type==SDL_EVENT_WINDOW_FOCUS_LOST) {
+        held_pad_buttons=0;suppressed_pad_buttons=0;
+    }
     static bool back_down, start_down;
     // a binding capture (Controls tab, or the game's Options screen) takes the press
     if (bind_capture_event(e)) return true;
@@ -251,15 +281,15 @@ bool menu_handle_event(const SDL_Event *e) {
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START) start_down = down;
         if (down && !typing && overlay_enabled() &&
             ((back_down && start_down) || e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
-            set_open(!g_open.load());
+            control_bar_toggle();
             return true;
         }
         if (!capturing()) return false;
         ImGuiKey k = key_from_pad(e->gbutton.button);
         if (g_sizes.load()) {  // Window size's list (in game): the buttons bound to A and B, wherever they are
             int b = e->gbutton.button;
-            if (b == g_bind_pad[BIND_A]) k = ImGuiKey_GamepadFaceDown;
-            else if (b == g_bind_pad[BIND_B]) k = ImGuiKey_GamepadFaceRight;
+            if (b == SDL_GAMEPAD_BUTTON_SOUTH) k = ImGuiKey_GamepadFaceDown;
+            else if (b == SDL_GAMEPAD_BUTTON_EAST) k = ImGuiKey_GamepadFaceRight;
         }
         if (k != ImGuiKey_None) { QEvent q = {}; q.kind = QEvent::KEY; q.key = k; q.down = down; push(q); }
         return true;
@@ -285,11 +315,12 @@ bool menu_handle_event(const SDL_Event *e) {
         return true;
     }
     case SDL_EVENT_MOUSE_MOTION:
-        if (!capturing()) return false;
+        if (!capturing() && !control_bar_hit(e->motion.x*g_pixel_density, e->motion.y*g_pixel_density)) return false;
         { QEvent q = {}; q.kind = QEvent::MOUSE_POS; q.x = e->motion.x * g_pixel_density; q.y = e->motion.y * g_pixel_density; push(q); }
         return true;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (!capturing()) return false;
+        if (!capturing() && !control_bar_hit(e->button.x*g_pixel_density, e->button.y*g_pixel_density)) return false;
+        { QEvent q = {}; q.kind=QEvent::MOUSE_POS; q.x=e->button.x*g_pixel_density; q.y=e->button.y*g_pixel_density; push(q); }
         {
             QEvent q = {};
             q.kind = QEvent::MOUSE_BUTTON;
@@ -447,6 +478,7 @@ static void init(void) {
 }
 
 static void drain_events(ImGuiIO &io) {
+    if(q_reset.exchange(false)) {io.ClearInputKeys();io.ClearInputMouse();}
     pthread_mutex_lock(&q_lock);
     std::vector<QEvent> ev;
     ev.swap(q_events);
@@ -652,7 +684,7 @@ static void tab_display(void) {
         for (int i = 0; i < NF; i++) {
             if (fps[i]) snprintf(names_buf[i], sizeof names_buf[i], tr("%d FPS"), fps[i]);
             names[i] = fps[i] ? names_buf[i] : "Off";
-            if (fps[i] == g_settings.fps_limit) cur = i;
+            if (fps[i] == framepace_configured_limit()) cur = i;
             if (fps[i] == FPS_DEFAULT) def = i;
         }
         std::string desc = tr("How many pictures a second the game draws. The game itself runs at the same speed at "
@@ -666,7 +698,7 @@ static void tab_display(void) {
                                            "pictures, and one that divides it evenly is the smoothest."), hz);
             desc += std::string("\n\n") + line;
         }
-        if (opt_choice("Frame rate", &cur, names, NF, def, desc.c_str(), false)) g_settings.fps_limit = fps[cur];
+        if (opt_choice("Frame rate", &cur, names, NF, def, desc.c_str(), false)) framepace_set_user_limit(fps[cur]);
     }
     {   // VSync (settings.h VSYNC_*: runtime/nvn/vulkan/device.c, runtime/hle/framepace.c)
         static const char *const names[VSYNC_COUNT] = {"On", "Fast", "Adaptive", "Off"};
@@ -1235,7 +1267,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     bool open = g_open.load();
     bool kbd = g_kbd.load() == 1;
     bool sizes = g_sizes.load();
-    if (!open && !kbd && !sizes && g_settings.perf_overlay == PERF_OFF) {
+    if (!overlay_enabled() && !open && !kbd && !sizes && g_settings.perf_overlay == PERF_OFF) {
         if (g_inited) { pthread_mutex_lock(&q_lock); q_events.clear(); pthread_mutex_unlock(&q_lock); }
         return;
     }
@@ -1282,6 +1314,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     ImGui::NewFrame();
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
+    if (overlay_enabled() && !open && !kbd && !sizes) control_bar_draw(scale);
 
     if (open) {
         // dim the game behind the menu
