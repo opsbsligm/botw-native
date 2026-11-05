@@ -69,6 +69,9 @@ static void load_nso(Module *m, const char *path, const GameLibModule *lm) {
     plat_commit(base, size);  // inside the guest window: zero-filled, read/write
     for (int i = 0; i < 3; i++) {
         uint32_t csize = *(uint32_t *)(raw + 0x60 + i * 4);
+        uint32_t file_size = flags & (1 << i) ? csize : seg[i][2];
+        if (seg[i][0] > len || file_size > len - seg[i][0])
+            FATAL("%s: segment %d past the end of the file\n", path, i);
         uint8_t *dst = (uint8_t *)base + seg[i][1];
         if (flags & (1 << i)) {
             size_t got = lz4_decompress(raw + seg[i][0], csize, dst, seg[i][2]);

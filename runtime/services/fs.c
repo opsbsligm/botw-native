@@ -174,28 +174,27 @@ static int64_t dir_lookup(const uint8_t *dm, uint64_t dsz, const char *path) {
     return cur;
 }
 
-static void add_new_files(const uint64_t *h, const uint8_t *dmeta, uint64_t dsz, uint64_t fsz) {
+static void add_new_files(const uint64_t *h, const uint8_t *dmeta, uint64_t dsz, const uint8_t *fmeta, uint64_t fsz) {
     if (!overlay_dir()) return;
     char root[1100];
     snprintf(root, sizeof root, "%s/%s", overlay_dir(), R->ov_sub ? R->ov_sub : "");
-    char **known = malloc(sizeof *known * R->rom_nfiles);
+    char **known = malloc(sizeof *known * (R->rom_nfiles ? R->rom_nfiles : 1));
+    if (!known) return;
     for (int i = 0; i < R->rom_nfiles; i++) known[i] = R->rom_files[i].path;
     qsort(known, R->rom_nfiles, sizeof *known, path_cmp);
     NewFile *nf = NULL;
     int n = 0, cap = 0;
     walk_new(root, "", known, R->rom_nfiles, &nf, &n, &cap);
     free(known);
-    if (!n) return;
-    R->rom_files = realloc(R->rom_files, sizeof(RomFile) * (R->rom_nfiles + n));
+    if (!n) { free(nf); return; }
     uint64_t hoff = h[5], hsz = h[6];
     uint8_t *dcopy = malloc(dsz), *hcopy = malloc(hsz), *head = malloc(0x50);
+    if (!dcopy || !hcopy || !head) goto fail;
     memcpy(dcopy, dmeta, dsz);
     if (romfs_image_pread(R->img, hcopy, hsz, hoff) != (ssize_t)hsz || romfs_image_pread(R->img, head, 0x50, 0) != 0x50)
-        return;
+        goto fail;
     // the file-meta table to extend: the override-patched copy if there is one
-    const uint8_t *base_meta = R->ov_meta;
-    uint8_t *tmp = NULL;
-    if (!base_meta) { tmp = malloc(fsz); romfs_image_pread(R->img, tmp, fsz, h[7]); base_meta = tmp; }
+    const uint8_t *base_meta = R->ov_meta ? R->ov_meta : fmeta;
     uint64_t extra = 0;
     for (int i = 0; i < n; i++) {
         const char *name = strrchr(nf[i].rel, '/');
@@ -204,8 +203,11 @@ static void add_new_files(const uint64_t *h, const uint8_t *dmeta, uint64_t dsz,
     }
     uint64_t nsz = fsz + extra;
     uint8_t *meta = calloc(1, nsz);
+    if (!meta) goto fail;
+    RomFile *files = realloc(R->rom_files, sizeof *files * (R->rom_nfiles + n));
+    if (!files) { free(meta); goto fail; }
+    R->rom_files = files;
     memcpy(meta, base_meta, fsz);
-    free(tmp);
     if (!R->ov_end) R->ov_end = (romfs_image_size(R->img) + 0xF) & ~0xFull;
     uint64_t meta_at = R->ov_end;  // the new table first, then the new files' data
     uint64_t data_at = (meta_at + nsz + 0xF) & ~0xFull;
@@ -253,7 +255,14 @@ static void add_new_files(const uint64_t *h, const uint8_t *dmeta, uint64_t dsz,
     R->patches[R->npatches++] = (Patch){0, 0x50, head};
     R->patches[R->npatches++] = (Patch){h[3], dsz, dcopy};
     R->patches[R->npatches++] = (Patch){hoff, hsz, hcopy};
+    free(nf);
     LOG("[fs] overlay: %d new romfs files\n", added);
+    return;
+fail:
+    free(nf);
+    free(dcopy);
+    free(hcopy);
+    free(head);
 }
 
 // The copy of the file-meta table that replacements patch (made on first use)
@@ -782,10 +791,13 @@ static void rom_index(void) {
     // header: size, dir hash (off,size), dir meta (off,size), file hash (off,size), file meta (off,size), data off
     uint64_t doff = h[3], dsz = h[4], foff = h[7], fsz = h[8];
     R->rom_data_off = h[9];
-    uint8_t *dmeta = malloc(dsz), *fmeta = malloc(fsz);
-    if (romfs_image_pread(R->img, dmeta, dsz, doff) != (ssize_t)dsz ||
-        romfs_image_pread(R->img, fmeta, fsz, foff) != (ssize_t)fsz)
+    uint8_t *dmeta = malloc(dsz ? dsz : 1), *fmeta = malloc(fsz ? fsz : 1);
+    if (!dmeta || !fmeta || romfs_image_pread(R->img, dmeta, dsz, doff) != (ssize_t)dsz ||
+        romfs_image_pread(R->img, fmeta, fsz, foff) != (ssize_t)fsz) {
+        free(dmeta);
+        free(fmeta);
         return;
+    }
     int cap = 4096;
     R->rom_files = malloc(sizeof(RomFile) * cap);
     for (uint64_t o = 0; o + 0x20 <= fsz;) {
@@ -855,7 +867,7 @@ static void rom_index(void) {
     rstb_patch(fmeta, foff, fsz);
     if (R->ov_n) LOG("[fs] overlay: %d romfs files replaced\n", R->ov_n);
     if (R->ov_meta) { R->patches[R->npatches++] = (Patch){R->ov_meta_off, R->ov_meta_size, R->ov_meta}; }
-    add_new_files(h, dmeta, dsz, fsz);
+    add_new_files(h, dmeta, dsz, fmeta, fsz);
     qsort(R->rom_files, R->rom_nfiles, sizeof *R->rom_files, rom_cmp);
     free(dmeta);
     free(fmeta);
