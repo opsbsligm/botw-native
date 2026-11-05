@@ -1,0 +1,8 @@
+Local static review (no guest execution):
+BOTW SDK7 1.6.0 main build ID 8e9978d50bdd20b4c8395a106c27ffde00000000000000000000000000000000.
+main+0x1226620 indexes the 99-name catalog at main+0x2bfeb78, clamps out-of-range to final ErrorViewerDRC entry.
+main+0x166eec0 searches the same 99 names, then indexes ScreenMgr *(main+0x2cc2490), checks count at +0x28 and array at +0x30 before dispatch.
+main+0x12125b0 (same-version menu update identified by pinned primary source) repeatedly checks Screen+0xfe state 2.
+Only fixed, named interactive screens are eligible. Object pointers and all ranges checked, runtime reads use process_vm_readv(self), no direct unchecked dereference.
+Synthetic-memory tests validate these structures and all transition cases; game/controller experience remains hardware_validated=false.
+Private full-function decompilation and NSO bytes are excluded from the repository.
