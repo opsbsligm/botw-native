@@ -7,3 +7,5 @@
 Linux 依赖源、版本和下载摘要在 `tools/build_deps.sh`；Python 依赖的精确版本与 wheel 摘要在 `requirements-build.lock`。Dockerfile 固定基础镜像摘要，Ubuntu 系统包从该发行版的安全更新源安装；这保证源码输入与构建流程可追溯，不承诺每次系统包更新后仍逐字节生成相同二进制。
 
 个人游戏包附带当前精确 Git 提交的 `source.tar.gz` 和来源说明。该源码归档不包含游戏生成代码、ROM、系统字体或其他私有输入。构建目录和个人游戏包不提交到本仓，不作为 CI 制品发布。
+
+本项目新增的 sensor-only Deck IMU 读取器、解码器和版本绑定数据补丁模块以 MIT 发布；原生运动的数据格式参考和验证范围见 `docs/native-motion.md`。这不改变其他上游文件的许可证。

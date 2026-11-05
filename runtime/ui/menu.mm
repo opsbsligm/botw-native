@@ -187,6 +187,7 @@ static std::atomic<bool> g_cursor_free{false};
 extern "C" bool menu_cursor_free(void) { return g_cursor_free.load(); }
 
 bool menu_handle_event(const SDL_Event *e) {
+    static bool back_down, start_down;
     // A close press can outlive the panel. Deliver releases to ImGui even while
     // collapsed, without consuming them from gameplay or leaving a stuck key.
     if(!capturing()) {
@@ -205,9 +206,9 @@ bool menu_handle_event(const SDL_Event *e) {
             if(capturing()) menu_absorb_pad_buttons();
         }
     } else if(e->type==SDL_EVENT_GAMEPAD_REMOVED || e->type==SDL_EVENT_WINDOW_FOCUS_LOST) {
-        held_pad_buttons=0;suppressed_pad_buttons=0;
+        held_pad_buttons=0;suppressed_pad_buttons=0;back_down=start_down=false;
+        pthread_mutex_lock(&q_lock);q_events.clear();q_reset=true;pthread_mutex_unlock(&q_lock);
     }
-    static bool back_down, start_down;
     // a binding capture (Controls tab, or the game's Options screen) takes the press
     if (bind_capture_event(e)) return true;
     if (e->type == SDL_EVENT_KEY_DOWN) g_last_pad = false;
