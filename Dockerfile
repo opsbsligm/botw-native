@@ -42,3 +42,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 
 RUN apt-get update && apt-get install -y --no-install-recommends fonts-wqy-microhei && rm -rf /var/lib/apt/lists/*
+
+# Dependency installation is complete. Build execution never installs packages.
+RUN /opt/venv/bin/python -m pip uninstall --yes pip
