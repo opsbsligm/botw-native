@@ -53,7 +53,7 @@ static const char *const k_hdr[HDR_COUNT] = {"auto", "on", "off"};             /
 // the display (75%, 50%, 25%: they keep FSR 1 at the nearest mode).
 #define SETTINGS_VERSION 3
 
-static const char *const k_icons[ICONS_COUNT] = {"auto", "keyboard", "xbox", "playstation", "nintendo"};
+static const char *const k_icons[ICONS_COUNT] = {"auto", "keyboard", "xbox", "playstation", "nintendo", "deck"};
 
 static const char *const k_quality[UPQ_COUNT] = {"ultra_quality", "quality", "balanced", "performance", "ultra_performance"};
 
