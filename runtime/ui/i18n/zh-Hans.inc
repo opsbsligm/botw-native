@@ -536,3 +536,7 @@ T("Cheat file / scope", "金手指文件与支持范围")
 T("Exact build ID; 0600 permissions. Data/heap codes 0-A only. All start off. Disabling stops writes; changed game data may persist.", "匹配版本；文件权限 0600。只支持数据与堆内存指令，默认全部关闭。关闭后停止写入，已经改变的游戏数据可能保留。")
 T("Upscaling quality", "上采样质量")
 T("Sharpening", "锐化")
+
+T("Extensions", "扩展")
+
+T("Advanced data patches", "高级数据补丁")

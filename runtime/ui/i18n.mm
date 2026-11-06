@@ -211,6 +211,7 @@ bool ui_merge_fallback_font(ImFontAtlas *atlas, float size, const ImFontConfig *
             for (auto &kv : by_text) b.AddText(kv.second), b.AddText(tr_upper(kv.second).c_str());
         }
         b.AddText("0123456789%()/:.,-+ ");
+        if(!strncmp(ui_lang(),"zh",2)) b.AddRanges(atlas->GetGlyphRangesChineseSimplifiedCommon());
         ranges.clear();
         b.BuildRanges(&ranges);
     }
