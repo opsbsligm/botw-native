@@ -1,4 +1,5 @@
 // Small services: parental control, add-on content, and other mostly-stubbed interfaces.
+#include "../nfp_buffer.h"
 #include <string.h>
 #include <stdlib.h>
 #include "../native_amiibo.h"
@@ -101,7 +102,7 @@ static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
     case 1: nd_amiibo_stop();nd_amiibo_initialize(0);break;
     case 2: {
         IpcBuf *b=out_buf(req,0);int count=state.initialized && b && b->size>=8;
-        if(count) {uint64_t id=1;memcpy((void *)(uintptr_t)b->addr,&id,8);}
+        if(count) {uint64_t id=1;if(!nd_nfp_write(b->addr,&id,8,GUEST_LO,GUEST_HI)) {resp->result=ND_NFP_NOT_FOUND;break;}}
         OUT(int32_t,0)=count;resp_size(resp,4);break;
     }
     case 3: resp->result=nd_amiibo_start();break;
@@ -111,7 +112,10 @@ static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
     case 13: case 16: {
         IpcBuf *b=out_buf(req,0);size_t need=req->cmd==13?0x58:0x40;
         if(!b || b->size<need) {resp->result=ND_NFP_NOT_FOUND;break;}
-        resp->result=req->cmd==13?nd_amiibo_tag_info((void *)(uintptr_t)b->addr,need):nd_amiibo_model_info((void *)(uintptr_t)b->addr,need);break;
+        unsigned char metadata[0x58];
+        resp->result=req->cmd==13?nd_amiibo_tag_info(metadata,sizeof metadata):nd_amiibo_model_info(metadata,sizeof metadata);
+        if(!resp->result && !nd_nfp_write(b->addr,metadata,need,GUEST_LO,GUEST_HI)) resp->result=ND_NFP_NOT_FOUND;
+        break;
     }
     case 17: case 18: case 23: {
         int index=req->cmd==17?0:req->cmd==18?1:2;uint32_t w,r;
