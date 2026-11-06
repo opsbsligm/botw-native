@@ -12,6 +12,8 @@ bool glyphs_apply(uint64_t addr, uint64_t pool_lo, uint64_t pool_hi, uint32_t fo
 // The same for the HUD's button textures (R8 masks, w x h texels, rows `row` bytes apart in lin): true when the texture
 // is one of them.
 bool glyphs_apply_layout(uint32_t format, uint32_t w, uint32_t h, uint8_t *lin, uint32_t row);
+// Help artwork follows Deck hardware even when the last input was a keyboard.
+bool glyphs_deck_art_enabled(void);
 
 // Changes whenever the icons to draw change (device, bindings, setting): sheets uploaded under another one go up again.
 uint32_t glyphs_generation(void);

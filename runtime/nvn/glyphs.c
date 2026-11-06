@@ -698,6 +698,8 @@ static const LayoutIcon k_layout_icons[] = {
 
 #include "deck_controller_diagram.inc"
 
+bool glyphs_deck_art_enabled(void) { return deck_diagram_enabled(); }
+
 bool glyphs_apply_layout(uint32_t format, uint32_t w, uint32_t h, uint8_t *lin, uint32_t row) {
     if (deck_controller_diagram(format,w,h,lin,row)) return true;
     if (format != FMT_R8 || w > 2 * CELL || h > 2 * CELL || row < w) return false;

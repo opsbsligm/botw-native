@@ -75,7 +75,46 @@ static bool deck_diagram_enabled(void) {
     return g_settings.button_icons==ICONS_DECK ||
         (g_settings.button_icons==ICONS_AUTO && input_pad_family()==3);
 }
+// Nine exact SDK7 closeups used by tutorials (five legacy pad views and four
+// Switch views). Crops retain their topic: shoulders, face buttons, left side.
+// Unknown art is never selected by dimensions alone.
+static bool deck_small_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *lin,uint32_t row) {
+    static const uint64_t identities[9] = {
+        0xd2316398fe71cb8aull,0x1ab2de0d50a452ffull,0x243e35faea9d39b6ull,
+        0xf4bcab4bac3a2c9cull,0x016c56e2f4a0eb21ull,0x158bd8dd5cc131c3ull,
+        0x5ba630897a05fb12ull,0x1c122818005987b1ull,0x1ae381a3464910a6ull
+    };
+    if(format!=0x0d || w!=h || (w!=188 && w!=228) || row<w*2) return false;
+    uint64_t hash=0xcbf29ce484222325ull;
+    for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
+    int index=-1;
+    for(int i=0;i<9;i++) if(identities[i]==hash && w==(i<5?188u:228u)) index=i;
+    if(index<0) return false;
+    if(!deck_diagram_enabled() || !font_ready()) return true;
+    bool shoulder=index==0||index==1||index==5||index==6;
+    uint32_t sh=shoulder?100:288;
+    uint8_t *art=malloc(576u*sh*2);
+    if(!art) return true;
+    deck_draw(art,576*2,576,sh);
+    int sx=0,sy=0,dy=shoulder?((int)h-100)/2:0;
+    if(index==1||index==6) sx=576-(int)w;
+    if(index==2) {sx=388;sy=30;}
+    if(index==7) {sx=348;sy=16;}
+    // Minus/View anchor of the tested Sheikah Slate tutorial: (126,54)
+    // in the authored full view becomes (117,30) in its left closeup.
+    if(index==8) {sx=9;sy=24;}
+    for(uint32_t y=0;y<h;y++) {
+        memset(lin+(uint64_t)y*row,0,w*2);
+        int source_y=(int)y-dy+sy;
+        if(source_y>=0 && source_y<(int)sh)
+            memcpy(lin+(uint64_t)y*row,art+((uint64_t)source_y*576+(unsigned)sx)*2,w*2);
+    }
+    free(art);
+    LOG("[glyphs] SDK7 Deck tutorial closeup %d (%ux%u): exact content match\n",index,w,h);
+    return true;
+}
 static bool deck_controller_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *lin,uint32_t row) {
+    if(deck_small_diagram(format,w,h,lin,row)) return true;
     if(format!=0x0d||w!=576||(h!=288&&h!=100)||row<w*2) return false;
     uint64_t hash=0xcbf29ce484222325ull;
     for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
