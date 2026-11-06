@@ -69,12 +69,18 @@ static void deck_draw(uint8_t *lin,uint32_t row,uint32_t w,uint32_t h) {
     #undef DP
     #undef DW
 }
+// The controller help diagram follows hardware, even after keyboard/OSK input.
+// Explicit user overrides still win; ordinary glyphs follow the last device.
+static bool deck_diagram_enabled(void) {
+    return g_settings.button_icons==ICONS_DECK ||
+        (g_settings.button_icons==ICONS_AUTO && input_pad_family()==3);
+}
 static bool deck_controller_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *lin,uint32_t row) {
     if(format!=0x0d||w!=576||(h!=288&&h!=100)||row<w*2) return false;
     uint64_t hash=0xcbf29ce484222325ull;
     for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
     if(hash!=(h==288?0x8b42a6ff21f5dea4ull:0x6e2b71b7ed623592ull)) return false;
-    if(resolve_kind()!=ICONS_DECK||!font_ready()) return true;
+    if(!deck_diagram_enabled()||!font_ready()) return true;
     deck_draw(lin,row,w,h);
     LOG("[glyphs] SDK7 Steam Deck diagram %ux%u: matched ABXY, sticks, touchpads, physical ABXY, L1/R1/L2/R2\n",w,h);
     return true;

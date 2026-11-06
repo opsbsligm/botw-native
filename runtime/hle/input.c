@@ -344,7 +344,7 @@ bool input_user_blocked(const SDL_Event *e) {
 int input_last_device(void) { return pad ? last_device : DEVICE_KEYBOARD; }
 
 // Controller family for the Controls tab labels (runtime/hle/bindings.c): 0 Nintendo / other / none, 1 Xbox, 2 PlayStation.
-// SAVAGEWIND_PAD_TYPE=xbox|playstation|nintendo pretends one is attached (tests).
+// SAVAGEWIND_PAD_TYPE=deck|xbox|playstation|nintendo pretends one is attached (tests).
 static _Atomic int pad_family;
 static void note_family(void) {
     int f = 0;

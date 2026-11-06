@@ -532,6 +532,7 @@ static int button_binding(int slot) {
 uint32_t glyphs_generation(void) {
     int k = resolve_kind();
     uint32_t h = 2166136261u ^ (uint32_t)k;
+    if(g_settings.button_icons==ICONS_AUTO) h=(h ^ (unsigned)input_pad_family())*16777619u;
     if (k!=ICONS_KEYBOARD) h=(h ^ (unsigned)input_menu_confirm_active())*16777619u;
     if (k == ICONS_KEYBOARD) {
         for (int i = 0; i < BIND_KEY_COUNT; i++) h = (h ^ (uint16_t)g_bind_key[i]) * 16777619u;
