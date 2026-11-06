@@ -44,3 +44,5 @@ python3 build.py runtime --work /mnt/botw-public-check
 ## 掌机应用控制
 
 F1 或 Minus+Plus 打开可折叠的边缘控制栏；应用菜单用 Deck A 确认、B 返回，游戏玩法映射保持不变。原生 IMU、已接通的画面选项、金手指导入边界和验证状态见 [应用控制](docs/application-controls.md)。固定版本游戏菜单也使用物理 A 确认、B 取消；已验证的软件范围与实机验收边界见 [菜单输入](docs/menu-confirm.md)。
+
+控制栏新增 Amiibo 标签库与版本绑定 Atmosphère 数据金手指；画面设置及支持边界见 [扩展功能说明](docs/feature5.md)。
