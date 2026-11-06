@@ -26,8 +26,8 @@ default:
 
 native-unit:
   needs: []
-  tags: [gitlab--duo]
-  image: local.gitlab-ci.invalid/gitlab-org/duo-workflow/default-docker-image/workflow-generic-image:v0.0.23
+  tags: [native-games]
+  image: native-games/toolchain:02b1aa2ee13b00c30b38
   script:
     - python3 tools/check_source.py
     - python3 .gitlab/check_dependency_coverage.py --input-only
