@@ -177,9 +177,8 @@ extern "C" bool menu_input_captured(void) {
     return capturing() || game_options_input_hold() || SDL_GetTicks() < g_sizes_hold.load();
 }
 
-// In game the settings are the game's own Options screen (game_options.mm): F1, Esc and the controller's home button no
-// longer open this menu (SAVAGEWIND_OVERLAY=1 brings it back). Esc frees the mouse cursor instead, a click in the
-// window holds it again (runtime/hle/input.c).
+// Application settings open from the native touchscreen edge handle.
+// Keyboard/controller shortcuts never open either settings surface.
 static bool overlay_enabled(void) {
     static const char *option = getenv("SAVAGEWIND_OVERLAY");
     static const bool on = !option || *option != '0';
@@ -250,6 +249,9 @@ bool menu_handle_event(const SDL_Event *e) {
     }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
+        if(!e->key.repeat && e->key.scancode==SDL_SCANCODE_ESCAPE && !capturing() && !typing) {
+            g_cursor_free=!g_cursor_free.load();return true; // cursor release only; never opens settings
+        }
         if (!e->key.repeat && e->key.scancode == SDL_SCANCODE_F10 && !typing) {  // performance overlay: off, FPS, full
             g_settings.perf_overlay = (g_settings.perf_overlay + 1) % 3;
             settings_save();
@@ -945,7 +947,7 @@ static void tab_about(void) {
     ImGui::Spacing();
     header("Mouse");
     toggle("Mouse camera", &g_settings.mouse_camera);
-    hint("The mouse turns the camera. While you play, the cursor stays in the window; Esc or F1 frees it.");
+    hint("The mouse turns the camera. Esc releases the cursor; settings open from the edge handle.");
     float sens = roundf(g_settings.mouse_sens * 100);
     if (opt_slider("Mouse sensitivity", &sens, 10, 1000, 5, MOUSE_SENS_DEFAULT * 100, "%g%%", "How fast the mouse turns the camera."))
         g_settings.mouse_sens = sens / 100.0f;
@@ -959,7 +961,7 @@ static void tab_about(void) {
     controls_bindings_draw(ImGui::GetFontSize() / 34);
     ImGui::Spacing();
     header("Menu");
-    ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
+    ImGui::TextUnformatted(tr("Open settings: tap the edge handle. Close with the collapse button or B."));
     ImGui::TextUnformatted(tr("Switch tabs:  L / R  (Q / E)        Back:  B  (Esc)"));
     ImGui::TextUnformatted(tr("Fullscreen:  F11 / Alt+Enter"));
 }
