@@ -368,7 +368,7 @@ void menu_apply_window_requests(void *win) {
 // ------------------------------------------------------------------ render thread
 static bool g_inited;
 static ImGuiContext *g_ctx;  // ours: the start screen (back to it after a reboot) has its own context
-static ImFont *g_font, *g_font_big, *g_sidebar_font;
+static ImFont *g_font, *g_font_big;
 static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Fira Sans); everything else keeps g_font
 static int g_tab, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
@@ -420,7 +420,7 @@ static int g_fonts_lang = -1;
 static void load_fonts(void) {
     ImGuiIO &io = ImGui::GetIO();
     io.Fonts->Clear();
-    g_font = g_font_big = g_menu_font = g_menu_font_big = g_sidebar_font = NULL;
+    g_font = g_font_big = g_menu_font = g_menu_font_big = NULL;
     g_fonts_lang = ui_lang_generation();
     ImFontConfig cfg;
     cfg.OversampleH = 2;
@@ -436,7 +436,6 @@ static void load_fonts(void) {
         if (FILE *f = fopen(p, "rb")) fclose(f);  // a missing file is an assertion in ImGui, not a NULL return
         else continue;
         if (!g_font) g_font = add(p, 34, cfg);
-        if (!g_sidebar_font) g_sidebar_font = add(p, 29.7f, cfg); // 22 px at the Deck's native 800p
         if (g_font && !g_font_big) { ImFontConfig b = cfg; b.FontNo = 0; g_font_big = add(p, 56, b); }
     }
     // the menu window itself: Fira Sans, as on the start screen (shipped, OFL) - Medium for the rows, SemiBold for the
@@ -451,7 +450,6 @@ static void load_fonts(void) {
     }
     if (!g_font) g_font = io.Fonts->AddFontDefault();
     if (!g_font_big) g_font_big = g_font;
-    if (!g_sidebar_font) g_sidebar_font = g_font;
     if (!g_menu_font || !g_menu_font_big) g_menu_font = g_font, g_menu_font_big = g_font_big;
 }
 
@@ -1330,7 +1328,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
     if (overlay_enabled() && !open && !kbd && !sizes) {
-        ImGui::PushFont(g_sidebar_font);control_bar_draw(scale);ImGui::PopFont();
+        ImGui::PushFont(g_menu_font);control_bar_draw(scale);ImGui::PopFont();
     }
 
     if (open) {
