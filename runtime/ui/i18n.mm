@@ -1,3 +1,4 @@
+#include "../native_ui_glyphs.h"
 // Menu languages: see i18n.h. The tables are compiled in (runtime/ui/i18n/<lang>.inc, one T("English", "...") per
 // text); the menu language is looked up again each frame, so choosing another text language switches the menus at
 // once (the start screen and the overlay rebuild their fonts when the new language needs other glyphs).
@@ -211,7 +212,7 @@ bool ui_merge_fallback_font(ImFontAtlas *atlas, float size, const ImFontConfig *
             for (auto &kv : by_text) b.AddText(kv.second), b.AddText(tr_upper(kv.second).c_str());
         }
         b.AddText("0123456789%()/:.,-+ ");
-        if(!strncmp(ui_lang(),"zh",2)) b.AddRanges(atlas->GetGlyphRangesChineseSimplifiedCommon());
+        if(!strncmp(ui_lang(),"zh",2)) {b.AddRanges(atlas->GetGlyphRangesChineseSimplifiedCommon());b.AddText(nd_ui_zh_glyphs);}
         ranges.clear();
         b.BuildRanges(&ranges);
     }
