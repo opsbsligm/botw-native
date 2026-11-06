@@ -1,4 +1,4 @@
-// In-game overlay menu (Dear ImGui). Open with F1 / Esc, or Minus+Plus (Back+Start) on a controller.
+// In-game overlay menu (Dear ImGui). Open from the touchscreen edge sidebar; shortcuts never open it.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

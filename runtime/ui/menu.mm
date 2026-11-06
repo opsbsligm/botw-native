@@ -35,6 +35,7 @@ extern "C" {
 }
 #include "menu.h"
 #include "control_bar.h"
+#include "../native_touch.h"
 void input_reset(void);
 void controls_bindings_draw(float scale);  // controls_ui.mm
 #include "../input_bind.h"
@@ -57,7 +58,7 @@ extern "C" void menu_request_window_size_apply(void) { g_size_apply_at.store(SDL
 extern "C" bool game_options_input_hold(void);  // game_options.mm: a binding capture from the game's Options screen
 
 struct QEvent {
-    enum { KEY, ANALOG, MOUSE_POS, MOUSE_BUTTON, WHEEL, TEXT } kind;
+    enum { KEY, ANALOG, MOUSE_POS, MOUSE_BUTTON, MOUSE_SOURCE, MOUSE_CANCEL, WHEEL, TEXT } kind;
     ImGuiKey key;
     bool down;
     float value, x, y;
@@ -68,6 +69,7 @@ static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
 static std::vector<QEvent> q_events;
 static std::atomic<bool> q_reset{false};
 static float g_pixel_density = 1;
+static std::atomic<float> touch_width{0},touch_height{0};
 
 static void push(const QEvent &e) {
     pthread_mutex_lock(&q_lock);
@@ -175,9 +177,8 @@ extern "C" bool menu_input_captured(void) {
     return capturing() || game_options_input_hold() || SDL_GetTicks() < g_sizes_hold.load();
 }
 
-// In game the settings are the game's own Options screen (game_options.mm): F1, Esc and the controller's home button no
-// longer open this menu (SAVAGEWIND_OVERLAY=1 brings it back). Esc frees the mouse cursor instead, a click in the
-// window holds it again (runtime/hle/input.c).
+// Application settings open from the native touchscreen edge handle.
+// Keyboard/controller shortcuts never open either settings surface.
 static bool overlay_enabled(void) {
     static const char *option = getenv("SAVAGEWIND_OVERLAY");
     static const bool on = !option || *option != '0';
@@ -187,7 +188,26 @@ static std::atomic<bool> g_cursor_free{false};
 extern "C" bool menu_cursor_free(void) { return g_cursor_free.load(); }
 
 bool menu_handle_event(const SDL_Event *e) {
-    static bool back_down, start_down;
+    static NdTouch touch={};
+    if(e->type==SDL_EVENT_FINGER_DOWN || e->type==SDL_EVENT_FINGER_MOTION ||
+       e->type==SDL_EVENT_FINGER_UP || e->type==SDL_EVENT_FINGER_CANCELED) {
+        float w=touch_width.load(),h=touch_height.load();
+        int type=e->type==SDL_EVENT_FINGER_DOWN?ND_TOUCH_DOWN:e->type==SDL_EVENT_FINGER_MOTION?ND_TOUCH_MOVE:
+                 e->type==SDL_EVENT_FINGER_UP?ND_TOUCH_UP:ND_TOUCH_CANCEL;
+        NdTouchResult r=nd_touch_route(&touch,type,e->tfinger.touchID,e->tfinger.fingerID,e->tfinger.x,e->tfinger.y,
+                                     w,h,control_bar_hit(e->tfinger.x*w,e->tfinger.y*h),capturing());
+        if(r.emit) {
+            QEvent q={};q.kind=QEvent::MOUSE_SOURCE;q.button=ImGuiMouseSource_TouchScreen;push(q);
+            if(r.cancel) {q.kind=QEvent::MOUSE_CANCEL;push(q);}
+            else {
+                q.kind=QEvent::MOUSE_POS;q.x=r.x;q.y=r.y;push(q);
+                if(type!=ND_TOUCH_MOVE) {q.kind=QEvent::MOUSE_BUTTON;q.button=0;q.down=r.down;push(q);}
+            }
+        }
+        return r.consumed;
+    }
+    if((e->type==SDL_EVENT_MOUSE_MOTION && e->motion.which==SDL_TOUCH_MOUSEID) ||
+       ((e->type==SDL_EVENT_MOUSE_BUTTON_DOWN || e->type==SDL_EVENT_MOUSE_BUTTON_UP) && e->button.which==SDL_TOUCH_MOUSEID)) return true;
     // A close press can outlive the panel. Deliver releases to ImGui even while
     // collapsed, without consuming them from gameplay or leaving a stuck key.
     if(!capturing()) {
@@ -206,7 +226,7 @@ bool menu_handle_event(const SDL_Event *e) {
             if(capturing()) menu_absorb_pad_buttons();
         }
     } else if(e->type==SDL_EVENT_GAMEPAD_REMOVED || e->type==SDL_EVENT_WINDOW_FOCUS_LOST) {
-        held_pad_buttons=0;suppressed_pad_buttons=0;back_down=start_down=false;
+        held_pad_buttons=0;suppressed_pad_buttons=0;nd_touch_reset(&touch);
         pthread_mutex_lock(&q_lock);q_events.clear();q_reset=true;pthread_mutex_unlock(&q_lock);
     }
     // a binding capture (Controls tab, or the game's Options screen) takes the press
@@ -229,14 +249,8 @@ bool menu_handle_event(const SDL_Event *e) {
     }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
-        if (!e->key.repeat && (e->key.scancode == SDL_SCANCODE_F1 ||
-                               (e->key.scancode == SDL_SCANCODE_ESCAPE && !g_open.load()))) {
-            if (!overlay_enabled()) {
-                if (e->key.scancode == SDL_SCANCODE_ESCAPE && !typing) g_cursor_free = !g_cursor_free.load();
-                return true;
-            }
-            if (!typing) set_open(!g_open.load());  // (Esc with the menu open goes to ImGui below: it cancels a field)
-            return true;
+        if(!e->key.repeat && e->key.scancode==SDL_SCANCODE_ESCAPE && !capturing() && !typing) {
+            g_cursor_free=!g_cursor_free.load();return true; // cursor release only; never opens settings
         }
         if (!e->key.repeat && e->key.scancode == SDL_SCANCODE_F10 && !typing) {  // performance overlay: off, FPS, full
             g_settings.perf_overlay = (g_settings.perf_overlay + 1) % 3;
@@ -278,13 +292,6 @@ bool menu_handle_event(const SDL_Event *e) {
         return true;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: {
         bool down = e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-        if (e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) back_down = down;
-        if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START) start_down = down;
-        if (down && !typing && overlay_enabled() &&
-            ((back_down && start_down) || e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
-            control_bar_toggle();
-            return true;
-        }
         if (!capturing()) return false;
         ImGuiKey k = key_from_pad(e->gbutton.button);
         if (g_sizes.load()) {  // Window size's list (in game): the buttons bound to A and B, wherever they are
@@ -316,10 +323,12 @@ bool menu_handle_event(const SDL_Event *e) {
         return true;
     }
     case SDL_EVENT_MOUSE_MOTION:
+        {QEvent q={};q.kind=QEvent::MOUSE_SOURCE;q.button=ImGuiMouseSource_Mouse;push(q);}
         if (!capturing() && !control_bar_hit(e->motion.x*g_pixel_density, e->motion.y*g_pixel_density)) return false;
         { QEvent q = {}; q.kind = QEvent::MOUSE_POS; q.x = e->motion.x * g_pixel_density; q.y = e->motion.y * g_pixel_density; push(q); }
         return true;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+        {QEvent q={};q.kind=QEvent::MOUSE_SOURCE;q.button=ImGuiMouseSource_Mouse;push(q);}
         if (!capturing() && !control_bar_hit(e->button.x*g_pixel_density, e->button.y*g_pixel_density)) return false;
         { QEvent q = {}; q.kind=QEvent::MOUSE_POS; q.x=e->button.x*g_pixel_density; q.y=e->button.y*g_pixel_density; push(q); }
         {
@@ -488,6 +497,8 @@ static void drain_events(ImGuiIO &io) {
         switch (q.kind) {
         case QEvent::KEY: io.AddKeyEvent(q.key, q.down); break;
         case QEvent::ANALOG: io.AddKeyAnalogEvent(q.key, q.value > 0.1f, q.value); break;
+        case QEvent::MOUSE_SOURCE: io.AddMouseSourceEvent((ImGuiMouseSource)q.button); break;
+        case QEvent::MOUSE_CANCEL: io.ClearInputMouse();io.AddMousePosEvent(-FLT_MAX,-FLT_MAX);break;
         case QEvent::MOUSE_POS: io.AddMousePosEvent(q.x, q.y); break;
         case QEvent::MOUSE_BUTTON: io.AddMouseButtonEvent(q.button, q.down); break;
         case QEvent::WHEEL: io.AddMouseWheelEvent(q.x, q.y); break;
@@ -936,7 +947,7 @@ static void tab_about(void) {
     ImGui::Spacing();
     header("Mouse");
     toggle("Mouse camera", &g_settings.mouse_camera);
-    hint("The mouse turns the camera. While you play, the cursor stays in the window; Esc or F1 frees it.");
+    hint("The mouse turns the camera. Esc releases the cursor; settings open from the edge handle.");
     float sens = roundf(g_settings.mouse_sens * 100);
     if (opt_slider("Mouse sensitivity", &sens, 10, 1000, 5, MOUSE_SENS_DEFAULT * 100, "%g%%", "How fast the mouse turns the camera."))
         g_settings.mouse_sens = sens / 100.0f;
@@ -950,7 +961,7 @@ static void tab_about(void) {
     controls_bindings_draw(ImGui::GetFontSize() / 34);
     ImGui::Spacing();
     header("Menu");
-    ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
+    ImGui::TextUnformatted(tr("Open settings: tap the edge handle. Close with the collapse button or B."));
     ImGui::TextUnformatted(tr("Switch tabs:  L / R  (Q / E)        Back:  B  (Esc)"));
     ImGui::TextUnformatted(tr("Fullscreen:  F11 / Alt+Enter"));
 }
@@ -1280,6 +1291,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     ImGui::SetCurrentContext(g_ctx);
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)tw, (float)th);
+    touch_width=(float)tw;touch_height=(float)th;
     io.DisplayFramebufferScale = ImVec2(1, 1);
     static double last;
     double now = SDL_GetTicks() / 1000.0;
@@ -1315,7 +1327,9 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     ImGui::NewFrame();
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
-    if (overlay_enabled() && !open && !kbd && !sizes) control_bar_draw(scale);
+    if (overlay_enabled() && !open && !kbd && !sizes) {
+        ImGui::PushFont(g_menu_font);control_bar_draw(scale);ImGui::PopFont();
+    }
 
     if (open) {
         // dim the game behind the menu
