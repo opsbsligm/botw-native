@@ -7,6 +7,8 @@
 #include "lz4.h"
 #include "rt.h"
 #include "native_cheats.h"
+#include "native_atmosphere.h"
+extern void nd_atm_heap_bounds(uint64_t *,uint64_t *);
 
 Module g_modules[MAX_MODULES];
 int g_nmodules;
@@ -89,6 +91,8 @@ static void load_nso(Module *m, const char *path, const GameLibModule *lm) {
     m->data_off = seg[2][1]; m->data_size = seg[2][2] + bss;
     if (!strcmp(m->name,"main")) {
         nd_cheats_bind("botw-1.6.0",id,base,base+m->data_off,m->data_size);
+        nd_atm_bind(id,base,base+m->data_off,m->data_size,nd_atm_heap_bounds);
+        nd_atm_reload("botw-native");
         const char *cheats=getenv("NATIVE_CHEATS_FILE");
         nd_cheats_load(cheats && *cheats ? cheats : "native-cheats.txt");
     }
