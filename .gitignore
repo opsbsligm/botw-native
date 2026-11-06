@@ -54,3 +54,12 @@ docs/RAMAS.md
 *.webm
 
 /source-manifest.json
+
+*.pem
+*.p12
+id_rsa*
+.env
+.env.*
+*.key
+*.token
+*pat-secret*
