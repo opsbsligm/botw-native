@@ -1,9 +1,12 @@
 // A persistent handle and a compact panel, rendered in the game's own swapchain.
 // Position and hit bounds are shared without reading ImGui from the SDL thread.
 #include "imgui.h"
+#include "../native_amiibo_ui.h"
+#include "../native_atmosphere_ui.h"
 #include "control_bar.h"
 #include "i18n.h"
 #include <atomic>
+#include <string.h>
 #include <math.h>
 #include <mutex>
 extern "C" {
@@ -88,6 +91,11 @@ void control_bar_draw(float scale) {
             }
             ImGui::EndCombo();
         }
+        const char *quality[]={"Ultra Quality (1.3x)","Quality (1.5x)","Balanced (1.7x)","Performance (2x)","Ultra Performance (3x)"};
+        ImGui::BeginDisabled(g_settings.upscaler==UPSCALE_OFF || !upscale_modes_available());
+        dirty |= ImGui::Combo(tr("Upscaling quality"),&g_settings.upscale_quality,quality,5);
+        ImGui::EndDisabled();
+        dirty |= ImGui::SliderInt(tr("Sharpening"),&g_settings.sharpening,0,10);
         ImGui::TextDisabled("%s", tr("FSR 4: unavailable on this Deck backend"));
         dirty |= ImGui::SliderFloat(tr("Motion sensitivity"), &g_settings.motion_sens, .1f, 3.f, "%.1fx");
         ImGui::TextDisabled("%s", motion_has_sensors() ? tr("Motion: native sensor connected") : tr("Motion: no sensor available"));
@@ -96,6 +104,8 @@ void control_bar_draw(float scale) {
             for(int i=0;i<8;++i) if(ImGui::Selectable(positions[i], anchor==i)) { g_settings.control_bar_anchor=i; dirty=true; }
             ImGui::EndCombo();
         }
+        nd_draw_amiibo_library("botw-native",!strncmp(ui_lang(),"zh",2));
+        nd_draw_atmosphere("botw-native",!strncmp(ui_lang(),"zh",2));
         ImGui::Separator(); ImGui::TextUnformatted(tr("Cheats / verified data patches"));
         if(!nd_cheats_count()) ImGui::TextDisabled("%s", tr("No compatible presets imported"));
         for(size_t i=0;i<nd_cheats_count();i++) {

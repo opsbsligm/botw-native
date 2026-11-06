@@ -7,6 +7,7 @@
 
 #include "hle.h"
 #include "kernel.h"
+#include <stdatomic.h>
 
 // ------------------------------------------------------------------ results
 #undef R_OK
@@ -79,6 +80,8 @@ static void handle_close(uint32_t h) {
     handles[h - 0x100] = NULL;
     o->refs--;
 }
+
+void kernel_close_handle(uint32_t h) {klock();handle_close(h);pthread_mutex_unlock(&g_klock);}
 
 // Threads blocked in WaitSynchronization; object signals wake only these (caller holds g_klock).
 static KThread *g_syncwaiters;
@@ -293,7 +296,8 @@ static bool kwait(int64_t timeout_ns, const struct timespec *ts) {
 typedef struct { uint64_t addr, size; uint32_t type, perm; } Region;
 static Region regions[1024];
 static int nregions;
-static uint64_t heap_size;
+static _Atomic uint64_t heap_size;
+void nd_atm_heap_bounds(uint64_t *base,uint64_t *size) {*base=HEAP_BASE;*size=atomic_load(&heap_size);}
 static uint64_t tls_next = TLS_BASE;
 uint64_t kernel_heap_size(void) { return heap_size; }  // bytes from HEAP_BASE set by SetHeapSize
 // Writable guest data regions (heap, mapped/physical memory, module .data): for debug/runtime memory scans.
