@@ -134,6 +134,9 @@ def main():
     cache = xdg('XDG_CACHE_HOME', '.cache') / 'botw-native'
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    extensions = xdg('XDG_DATA_HOME', '.local/share') / 'botw-native'
+    for category in ('amiibo', 'cheats'):
+        (extensions / category).mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = data / 'native-launch/instance.lock'
     lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with lock_path.open('a') as lock:

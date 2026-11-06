@@ -9,3 +9,7 @@ Linux 依赖源、版本和下载摘要在 `tools/build_deps.sh`；Python 依赖
 个人游戏包附带当前精确 Git 提交的 `source.tar.gz` 和来源说明。该源码归档不包含游戏生成代码、ROM、系统字体或其他私有输入。构建目录和个人游戏包不提交到本仓，不作为 CI 制品发布。
 
 本项目新增的 sensor-only Deck IMU 读取器、解码器和版本绑定数据补丁模块以 MIT 发布；原生运动的数据格式参考和验证范围见 `docs/native-motion.md`。这不改变其他上游文件的许可证。
+
+## 第五项扩展功能
+
+只读 NFP/NTAG215 ABI 参考 libnx 与 `valentderah/totk-pc-recomp@0ae47a578285cde080642c9e6c40316c99171ef1`。Atmosphère VM 的基础执行代码适配自同一 MIT 项目，保留作者 Valiantsin Dzerakh 的 MIT 许可（`licenses/totk-pc-recomp-MIT.txt`）；本仓新增有界导入、数据/堆权限边界、默认关闭、内核安全拷贝与异常隔离。上游实际实现不能代替本游戏版本与硬件验证。
