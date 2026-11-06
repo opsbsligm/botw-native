@@ -63,6 +63,7 @@ void klock(void);  // pthread_mutex_lock(&g_klock), with a short spin first (ker
 extern KThread *g_waitlist;
 
 KObject *handle_get(uint32_t h);
+void kernel_close_handle(uint32_t h); // host-owned handles, not borrowed guest handles
 uint32_t kernel_new_handle(KObject *o);
 void kernel_signal(KObject *o);  // caller holds g_klock
 // (debug) an HLE write of [addr, addr+len) into guest memory: reported when it overlaps SAVAGEWIND_WATCH
