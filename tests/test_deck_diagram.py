@@ -8,5 +8,5 @@ class DiagramSelection(unittest.TestCase):
         cflags=shlex.split(subprocess.check_output(['pkg-config','--cflags','sdl3'],text=True))
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as d:
             exe=Path(d)/'diagram-selection'
-            subprocess.run(['cc','-std=gnu17','-O1','-ffunction-sections','-fdata-sections','-I',str(ROOT/'runtime'),*cflags,str(ROOT/'tests/deck_diagram_selection.c'),'-Wl,--gc-sections','-lm','-o',str(exe)],check=True,timeout=60)
+            subprocess.run(['clang','-std=gnu17','-march=x86-64-v3','-O1','-ffunction-sections','-fdata-sections','-I',str(ROOT/'runtime'),*cflags,str(ROOT/'tests/deck_diagram_selection.c'),'-Wl,--gc-sections','-lm','-o',str(exe)],check=True,timeout=60)
             subprocess.run([str(exe)],check=True,timeout=15)
