@@ -36,7 +36,10 @@ bool nd_botw_menu_context(NdMenuRead read, void *u) {
         !get(read,u,arr,screens,sizeof screens)) return false;
     /* Explicit interactive screens only; HUD, pickup tips, pause backgrounds and
        MainShortCut are deliberately absent so gameplay/quick weapon controls stay original. */
-    static const unsigned ids[]={1,0x13,0x14,0x15,0x17,0x20,0x21,0x22,0x2a,0x2c,
+    /* AppMap_00 (0x2a) also stays open for the WORLD minimap. It is not an
+       independent modal input surface; the full Slate map opens AppHome_00
+       (0x2c), which remains in this list. */
+    static const unsigned ids[]={1,0x13,0x14,0x15,0x17,0x20,0x21,0x22,0x2c,
         0x2e,0x2f,0x30,0x32,0x34,0x35,0x37,0x38,0x39,0x3b,0x3c,0x3d,0x3e,0x3f,0x4a,0x4f};
     bool active=false;
     for (size_t i=0;i<sizeof ids/sizeof *ids;i++) {

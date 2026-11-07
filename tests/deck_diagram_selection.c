@@ -28,5 +28,19 @@ int main(void) {
     for(unsigned i=0;i<sizeof unknown;i++) assert(unknown[i]==17);
     assert(!deck_small_diagram(0x0d,228,228,unknown,228*2-1));
     assert(!deck_small_diagram(0x01,228,228,unknown,228*2));
+    // Negative crop offsets pad the artwork, never read before its buffer or
+    // overwrite row padding. This is the measured View/Minus tutorial fix.
+    uint8_t art[576*100*2],cropped[(228*2+8)*228+32];
+    for(unsigned i=0;i<sizeof art;i++) art[i]=(uint8_t)(i*13u);
+    memset(cropped,0xa5,sizeof cropped);
+    deck_crop_rg8(art,100,cropped+16,228*2+8,228,228,-15,-4,0);
+    for(unsigned y=0;y<228;y++) {
+        for(unsigned x=0;x<228;x++) for(unsigned c=0;c<2;c++) {
+            uint8_t expected=(y>=4 && y<104 && x>=15)?art[((y-4)*576+x-15)*2+c]:0;
+            assert(cropped[16+y*(228*2+8)+x*2+c]==expected);
+        }
+        for(unsigned x=228*2;x<228*2+8;x++) assert(cropped[16+y*(228*2+8)+x]==0xa5);
+    }
+    for(unsigned i=0;i<16;i++) assert(cropped[i]==0xa5 && cropped[sizeof cropped-16+i]==0xa5);
     return 0;
 }

@@ -50,6 +50,13 @@ int main(void) {
  count=99;put(0x28,&count,4);bad=1;assert(!nd_botw_menu_context(rd,0));bad=0;
  uint64_t invalid=~0ull;put(0x100+8*0x2e,&invalid,8);assert(!nd_botw_menu_context(rd,0));
  put(0x100+8*0x2e,&(uint64_t){0},8);
+ // Actual minimap regression: AppMap is open while the world remains playable.
+ put(0x100+8*0x2a,&obj,8);assert(!nd_botw_menu_context(rd,0));
+ // Opening the full Slate map also opens its AppHome modal parent.
+ uint64_t home=0x7240001800ull;put(0x100+8*0x2c,&home,8);mem[0x18fe]=2;
+ assert(nd_botw_menu_context(rd,0));
+ mem[0x18fe]=3;assert(!nd_botw_menu_context(rd,0));
+ put(0x100+8*0x2c,&(uint64_t){0},8);put(0x100+8*0x2a,&(uint64_t){0},8);
  put(0x100+8*0x25,&obj,8);assert(!nd_botw_menu_context(rd,0)); // world HUD never swaps
  put(0x100+8*0x2d,&obj,8);assert(!nd_botw_menu_context(rd,0)); // quick weapon controls unchanged
  assert(!nd_botw_menu_context(0,0));

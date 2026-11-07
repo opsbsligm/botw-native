@@ -75,6 +75,19 @@ static bool deck_diagram_enabled(void) {
     return g_settings.button_icons==ICONS_DECK ||
         (g_settings.button_icons==ICONS_AUTO && input_pad_family()==3);
 }
+static void deck_crop_rg8(const uint8_t *art,uint32_t sh,uint8_t *lin,uint32_t row,
+                          uint32_t w,uint32_t h,int sx,int sy,int dy) {
+    int left=sx<0?-sx:0,source_left=sx<0?0:sx;
+    int count=(int)w-left;
+    if(count>576-source_left) count=576-source_left;
+    for(uint32_t y=0;y<h;y++) {
+        memset(lin+(uint64_t)y*row,0,w*2);
+        int source_y=(int)y-dy+sy;
+        if(count>0 && source_y>=0 && source_y<(int)sh)
+            memcpy(lin+(uint64_t)y*row+(unsigned)left*2,
+                   art+((uint64_t)source_y*576+(unsigned)source_left)*2,(unsigned)count*2);
+    }
+}
 // Nine exact SDK7 closeups used by tutorials (five legacy pad views and four
 // Switch views). Crops retain their topic: shoulders, face buttons, left side.
 // Unknown art is never selected by dimensions alone.
@@ -100,15 +113,11 @@ static bool deck_small_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *li
     if(index==1||index==6) sx=576-(int)w;
     if(index==2) {sx=388;sy=30;}
     if(index==7) {sx=348;sy=16;}
-    // Minus/View anchor of the tested Sheikah Slate tutorial: (126,54)
-    // in the authored full view becomes (117,30) in its left closeup.
-    if(index==8) {sx=9;sy=24;}
-    for(uint32_t y=0;y<h;y++) {
-        memset(lin+(uint64_t)y*row,0,w*2);
-        int source_y=(int)y-dy+sy;
-        if(source_y>=0 && source_y<(int)sh)
-            memcpy(lin+(uint64_t)y*row,art+((uint64_t)source_y*576+(unsigned)sx)*2,w*2);
-    }
+    // Exact original Minus rectangle bounds132..150 /54..61 give centre
+    // (141,57.5). View at(126,54) becomes(141,58), within half a source pixel
+    // of the existing animated highlight; pad/crop instead of stretching art.
+    if(index==8) {sx=-15;sy=-4;}
+    deck_crop_rg8(art,sh,lin,row,w,h,sx,sy,dy);
     free(art);
     LOG("[glyphs] SDK7 Deck tutorial closeup %d (%ux%u): exact content match\n",index,w,h);
     return true;

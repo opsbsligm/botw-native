@@ -12,14 +12,17 @@ int main(void) {
     for(unsigned i=0;i<13;i++) {
         uint8_t *p=original+20+i*180;memcpy(p,"txt1",4);u32(p+4,180);strcpy((char *)p+12,names[i]);
         p[0x5a]=1;u32(p+0x64,168);p[168]=(uint8_t)codes[i];p[169]=(uint8_t)(codes[i]>>8);
+        float size[2]={24,24};memcpy(p+0x70,size,sizeof size);
     }
     memcpy(changed,original,N);assert(nd_help_text(changed,N,"BAYX")==0);assert(!memcmp(changed,original,N));
     assert(nd_help_text_impl(changed,N,"BAYX")==12);
     for(unsigned i=0;i<12;i++) {
         uint8_t *p=changed+20+i*180;assert(p[0x5a]==0 && p[0x5b]==0);
         assert(p[168]=="BAYX"[codes[i]-0xe040] && p[169]==0);
+        float size[2];memcpy(size,p+0x70,sizeof size);
+        assert(fabsf(size[0]-16.8f)<0.001f && fabsf(size[1]-16.8f)<0.001f);
         // Every byte outside font index and one UTF16 code unit is retained.
-        for(unsigned j=0;j<180;j++) if(j!=0x5a && j!=0x5b && j!=168 && j!=169)
+        for(unsigned j=0;j<180;j++) if(j!=0x5a && j!=0x5b && j!=168 && j!=169 && (j<0x70 || j>=0x78))
             assert(p[j]==original[20+i*180+j]);
     }
     assert(!memcmp(changed+20+12*180,original+20+12*180,180));
@@ -27,6 +30,8 @@ int main(void) {
     assert(nd_help_text_impl(changed,N,"BAYX")==0 && !memcmp(changed,broken,N));
     memcpy(changed,original,N);assert(nd_help_text_impl(changed,N-1,"BAYX")==0);
     assert(nd_help_text_impl(changed,N,"BA?X")==0 && !memcmp(changed,original,N));
+    memcpy(broken,original,N);float invalid=NAN;memcpy(broken+20+11*180+0x70,&invalid,sizeof invalid);
+    memcpy(changed,broken,N);assert(nd_help_text_impl(changed,N,"BAYX")==0 && !memcmp(changed,broken,N));
     puts("World help labels match physical bindings; menu footer untouched; malformed layouts leave no partial edits");
     return 0;
 }

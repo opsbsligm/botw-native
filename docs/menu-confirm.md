@@ -4,6 +4,8 @@ Linux 上已固定的 BOTW 1.6.0 SDK7 输入路径，在标题、背包、地图
 
 同一个按钮按住跨越菜单边界时，先等待释放再接收新操作；菜单退出不会把刚才的确认直接转成冲刺。应用控制栏自己的 A/B 导航独立处理。
 
+`AppMap_00` 同时服务世界小地图，单独打开时不算交互菜单。全屏希卡之石地图由其 `AppHome_00` 菜单入口判定，避免世界冲刺/互动随小地图被交换。此区别有同版本实机状态轨迹及合成对象共存回归；不凭相机或世界时间推测。
+
 图形提示使用相同菜单上下文重新生成 A/B 字形；退出菜单重新使用原玩法绑定。`SAVAGEWIND_MENU_CONFIRM=0` 可显式恢复原始游戏菜单输入。只支持仓库固定的完整 NSO build ID；其他版本不套用本布局。
 
 版本依据：本地同版本模块中名称索引函数 `main+0x1226620`、按名称派发到 ScreenMgr 的 `main+0x166eec0`，以及 GameUIManager 对屏幕 `+0xfe == 2` 的可见状态检查。公开交叉来源为 [MacNativeGames 的 1.6.0 菜单更新定位](https://github.com/ly05010419/MacNativeGames/blob/5843ee56f3ab6911e32d61d46e96fee4ce8137de/games/totk/runtime/game_patches_botw.c)。不复制完整反编译内容到源码仓库。
