@@ -9,6 +9,7 @@
 #endif
 #include <SDL3/SDL.h>
 #ifdef __linux__
+#include "../native_memory.h"
 #include <sys/uio.h>
 #include <unistd.h>
 #endif
@@ -343,7 +344,7 @@ bool input_user_blocked(const SDL_Event *e) {
 int input_last_device(void) { return pad ? last_device : DEVICE_KEYBOARD; }
 
 // Controller family for the Controls tab labels (runtime/hle/bindings.c): 0 Nintendo / other / none, 1 Xbox, 2 PlayStation.
-// SAVAGEWIND_PAD_TYPE=xbox|playstation|nintendo pretends one is attached (tests).
+// SAVAGEWIND_PAD_TYPE=deck|xbox|playstation|nintendo pretends one is attached (tests).
 static _Atomic int pad_family;
 static void note_family(void) {
     int f = 0;
@@ -352,14 +353,16 @@ static void note_family(void) {
         case SDL_GAMEPAD_TYPE_PS3: case SDL_GAMEPAD_TYPE_PS4: case SDL_GAMEPAD_TYPE_PS5: f = 2; break;
         default: break;
     }
-    if (f != pad_family) LOG("[input] button prompts: %s controller\n", f == 1 ? "Xbox" : f == 2 ? "PlayStation" : "Nintendo / other");
+    if(pad && SDL_GetGamepadVendor(pad)==0x28de &&
+       (SDL_GetGamepadProduct(pad)==0x1205 || SDL_GetGamepadProduct(pad)==0x11ff)) f=3;
+    if (f != pad_family) LOG("[input] button prompts: %s controller\n", f == 3 ? "Steam Deck" : f == 1 ? "Xbox" : f == 2 ? "PlayStation" : "Switch / other");
     pad_family = f;
 }
 int input_pad_family(void) {
     static int env = -2;
     if (env == -2) {
         const char *e = getenv("SAVAGEWIND_PAD_TYPE");
-        env = !e ? -1 : !strcmp(e, "xbox") ? 1 : !strcmp(e, "playstation") || !strcmp(e, "ps") ? 2 : 0;
+        env = !e ? -1 : !strcmp(e, "deck") ? 3 : !strcmp(e, "xbox") ? 1 : !strcmp(e, "playstation") || !strcmp(e, "ps") ? 2 : 0;
     }
     return env >= 0 ? env : pad_family;
 }
@@ -672,8 +675,7 @@ RT_ON_RESET(menu_confirm_reset) {
 #ifdef __linux__
 static bool menu_read(void *unused, uint64_t addr, void *out, size_t size) {
     (void)unused;
-    struct iovec local={out,size},remote={(void *)(uintptr_t)addr,size};
-    return process_vm_readv(getpid(),&local,1,&remote,1,0)==(ssize_t)size;
+    return nd_memory_copy(addr,out,size,0)!=0;
 }
 #endif
 /* Called by game polling and movie wakeup. No camera/time heuristics, no guest writes.

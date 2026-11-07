@@ -11,12 +11,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <zlib.h>
+#include <SDL3/SDL.h>
 
 #include "../game_sites.h"
 #include "../hle.h"
 #include "../ipc.h"
 #include "../language.h"
 #include "../romfs_image.h"
+#include "../input_bind.h"
+#include "../nvn/glyphs.h"
+#include "../deck_help_labels.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -615,6 +619,20 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
         arc2 = malloc(an + 4 * (0x80 + 0x2000));
         memcpy(arc2, arc, an);
         nn = an;
+        if (glyphs_deck_art_enabled()) {
+            int hi = sarc_find(arc, an, "blyt/PaAllControllerTipsNN_00.bflyt", &adoff, &as, &ae);
+            char labels[4] = {0};
+            for (int j = 0; j < 4; j++) {
+                switch (g_bind_pad[BIND_A + j]) {
+                case SDL_GAMEPAD_BUTTON_SOUTH: labels[j] = 'A'; break;
+                case SDL_GAMEPAD_BUTTON_EAST: labels[j] = 'B'; break;
+                case SDL_GAMEPAD_BUTTON_WEST: labels[j] = 'X'; break;
+                case SDL_GAMEPAD_BUTTON_NORTH: labels[j] = 'Y'; break;
+                }
+            }
+            int help = hi >= 0 ? nd_help_text(arc2 + adoff + as, ae - as, labels) : 0;
+            LOG("[fs] Deck world help: %d labels isolated from menu icons; footer remains A confirm/B cancel\n", help);
+        }
         for (int i = 0; i < 4 && !why; i++) {
             int li = sarc_find(arc, an, layouts[i], &adoff, &as, &ae);
             if (li < 0 || ae - as > 0x2000 - 64) { why = "layout not found"; break; }

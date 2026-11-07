@@ -425,26 +425,26 @@ static int nintendo_code(int host) {
 }
 
 // A controller button as an Xbox / PlayStation icon
-static void pad_button(Canvas *c, Box b, int host, bool ps) {
+static void pad_button(Canvas *c, Box b, int host, bool ps, bool deck) {
     switch (host) {
     case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_EAST: case SDL_GAMEPAD_BUTTON_WEST: case SDL_GAMEPAD_BUTTON_NORTH:
         if (ps) ps_face(c, b, host);
         else round_label(c, b, host == SDL_GAMEPAD_BUTTON_SOUTH ? "A" : host == SDL_GAMEPAD_BUTTON_EAST ? "B" :
                                host == SDL_GAMEPAD_BUTTON_WEST ? "X" : "Y");
         return;
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: tab_label(c, b, ps ? "L1" : "LB"); return;
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: tab_label(c, b, ps ? "R1" : "RB"); return;
-    case PADB_LTRIGGER: tab_label(c, b, ps ? "L2" : "LT"); return;
-    case PADB_RTRIGGER: tab_label(c, b, ps ? "R2" : "RT"); return;
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: tab_label(c, b, ps || deck ? "L1" : "LB"); return;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: tab_label(c, b, ps || deck ? "R1" : "RB"); return;
+    case PADB_LTRIGGER: tab_label(c, b, ps || deck ? "L2" : "LT"); return;
+    case PADB_RTRIGGER: tab_label(c, b, ps || deck ? "R2" : "RT"); return;
     case SDL_GAMEPAD_BUTTON_START: menu_button(c, b, true, ps); return;
     case SDL_GAMEPAD_BUTTON_BACK: menu_button(c, b, false, ps); return;
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK: round_label(c, b, ps ? "L3" : "LS"); return;
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: round_label(c, b, ps ? "R3" : "RS"); return;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: round_label(c, b, ps || deck ? "L3" : "LS"); return;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: round_label(c, b, ps || deck ? "R3" : "RS"); return;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: dpad(c, b, DIR_U); return;
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: dpad(c, b, DIR_D); return;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: dpad(c, b, DIR_L); return;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: dpad(c, b, DIR_R); return;
-    default: tab_label(c, b, bind_pad_label(host, ps ? 2 : 1)); return;
+    default: tab_label(c, b, bind_pad_label(host, deck ? 3 : ps ? 2 : 1)); return;
     }
 }
 
@@ -518,7 +518,7 @@ static int resolve_kind(void) {
     if (k > ICONS_AUTO && k < ICONS_COUNT) return k;
     if (input_last_device() == DEVICE_KEYBOARD) return ICONS_KEYBOARD;
     int f = input_pad_family();
-    return f == 1 ? ICONS_XBOX : f == 2 ? ICONS_PLAYSTATION : ICONS_NINTENDO;
+    return f == 3 ? ICONS_DECK : f == 1 ? ICONS_XBOX : f == 2 ? ICONS_PLAYSTATION : ICONS_NINTENDO;
 }
 
 static int button_binding(int slot) {
@@ -532,6 +532,7 @@ static int button_binding(int slot) {
 uint32_t glyphs_generation(void) {
     int k = resolve_kind();
     uint32_t h = 2166136261u ^ (uint32_t)k;
+    if(g_settings.button_icons==ICONS_AUTO) h=(h ^ (unsigned)input_pad_family())*16777619u;
     if (k!=ICONS_KEYBOARD) h=(h ^ (unsigned)input_menu_confirm_active())*16777619u;
     if (k == ICONS_KEYBOARD) {
         for (int i = 0; i < BIND_KEY_COUNT; i++) h = (h ^ (uint16_t)g_bind_key[i]) * 16777619u;
@@ -542,14 +543,14 @@ uint32_t glyphs_generation(void) {
     return h | 1;
 }
 
-static const char *const k_kind_names[ICONS_COUNT] = {"auto", "keyboard", "Xbox", "PlayStation", "Nintendo"};
+static const char *const k_kind_names[ICONS_COUNT] = {"auto", "keyboard", "Xbox", "PlayStation", "Switch", "Steam Deck"};
 
 // The icon for one glyph: false = keep the game's (or *copy: the game's glyph for that code instead)
 static bool draw_glyph(Canvas *c, Box b, int code, int kind, int *copy) {
     Meaning m = meaning(code);
     *copy = 0;
     if (m.kind == G_KEEP) return false;
-    bool ps = kind == ICONS_PLAYSTATION;
+    bool ps = kind == ICONS_PLAYSTATION, deck = kind == ICONS_DECK;
     if (kind == ICONS_NINTENDO) {  // the game's glyphs, following the controller bindings
         int host = -1;
         if (m.kind == G_BUTTON) host = button_binding(m.arg);
@@ -582,11 +583,11 @@ static bool draw_glyph(Canvas *c, Box b, int code, int kind, int *copy) {
     }
     // Xbox / PlayStation: buttons through the bindings; the sticks keep the game's (L / R)
     switch (m.kind) {
-    case G_BUTTON: pad_button(c, b, button_binding(m.arg), ps); return true;
+    case G_BUTTON: pad_button(c, b, button_binding(m.arg), ps, deck); return true;
     case G_DPAD:
         if (!(m.arg & (m.arg - 1))) {
             int host = g_bind_pad[k_dpad_slot[dir_index(m.arg)]];
-            if (host != k_dpad_host[dir_index(m.arg)]) { pad_button(c, b, host, ps); return true; }
+            if (host != k_dpad_host[dir_index(m.arg)]) { pad_button(c, b, host, ps, deck); return true; }
         }
         dpad(c, b, m.arg);
         return true;
@@ -695,7 +696,12 @@ static const LayoutIcon k_layout_icons[] = {
     {64, 64, 0xc171fee97aa2e0b1ull, 0xE049},  // ButtonIconL46NN_00: the d-pad (the shortcuts at the top left)
 };
 
+#include "deck_controller_diagram.inc"
+
+bool glyphs_deck_art_enabled(void) { return deck_diagram_enabled(); }
+
 bool glyphs_apply_layout(uint32_t format, uint32_t w, uint32_t h, uint8_t *lin, uint32_t row) {
+    if (deck_controller_diagram(format,w,h,lin,row)) return true;
     if (format != FMT_R8 || w > 2 * CELL || h > 2 * CELL || row < w) return false;
     const LayoutIcon *li = NULL;
     for (size_t i = 0; i < sizeof k_layout_icons / sizeof *k_layout_icons && !li; i++)

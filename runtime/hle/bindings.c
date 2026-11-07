@@ -77,8 +77,13 @@ const char *bind_pad_label(int host, int fam) {
         "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right", "Mute", "Right back button", "Left back button",
         "Right Fn", "Left Fn", "Touchpad", "Misc 2", "Misc 3", "Misc 4", "Misc 5", "Misc 6", "L2", "R2",
     };
+    static const char *const deck[PADB_HOST_COUNT] = {
+        "A", "B", "X", "Y", "View", "Steam", "Menu", "L3", "R3", "L1", "R1",
+        "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right", "Quick Access", "R4", "L4",
+        "R5", "L5", "Touchpad", "Misc 2", "Misc 3", "Misc 4", "Misc 5", "Misc 6", "L2", "R2",
+    };
     if (host < 0 || host >= PADB_HOST_COUNT) return "(none)";
-    return fam == 1 ? xb[host] : fam == 2 ? ps[host] : nin[host];
+    return fam == 3 ? deck[host] : fam == 1 ? xb[host] : fam == 2 ? ps[host] : nin[host];
 }
 
 static const char *const k_mouse[5] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse Back", "Mouse Forward"};
@@ -96,8 +101,14 @@ int bind_label_family(void) {
     if (f) return f;
     int n = 0, t = 0;  // start screen: input.c hasn't opened a pad yet
     SDL_JoystickID *ids = SDL_GetGamepads(&n);
-    if (ids && n > 0) t = SDL_GetGamepadTypeForID(ids[0]);
+    bool deck=false;
+    if (ids && n > 0) {
+        t = SDL_GetGamepadTypeForID(ids[0]);
+        const char *name=SDL_GetGamepadNameForID(ids[0]);
+        deck=name && (!strcmp(name,"Steam Deck Controller") || !strcmp(name,"Steam Deck"));
+    }
     SDL_free(ids);
+    if(deck) return 3;
     return t == SDL_GAMEPAD_TYPE_XBOX360 || t == SDL_GAMEPAD_TYPE_XBOXONE ? 1 :
            t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? 2 : 0;
 }
