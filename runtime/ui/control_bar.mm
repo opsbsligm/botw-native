@@ -81,7 +81,6 @@ void control_bar_draw(float) {
             if(ImGui::Button(t("More settings","更多设置"),ImVec2(-1,50))) {expanded=false;menu_control_open_full();}
         } else if(sidebar.page==2) nd_draw_amiibo_library("botw-native",zh);
         else nd_draw_atmosphere("botw-native",zh);
-        if(ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) || ImGui::IsKeyPressed(ImGuiKey_Escape)) toggle=true;
     }
     ImVec2 lo,hi;dirty|=nd_sidebar_end(sidebar,open,&anchor,zh,&lo,&hi);
     {std::lock_guard<std::mutex> guard(bounds_lock);lower=lo;upper=hi;}
