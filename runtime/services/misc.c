@@ -77,14 +77,22 @@ SERVICE("aoc:u", aoc_u) {
 typedef struct NfpSession {uint32_t event[3];struct NfpSession *next;} NfpSession;
 static NfpSession *nfp_sessions;
 static pthread_mutex_t nfp_lock=PTHREAD_MUTEX_INITIALIZER;
-static void nfp_notify(int activated) {
-    pthread_mutex_lock(&nfp_lock);klock();
+static void nfp_sync_events(void) {
+    pthread_mutex_lock(&nfp_lock);
+    NdAmiiboSnapshot state;nd_amiibo_snapshot(&state);
+    int present=state.state==2 || state.state==4;
+    klock();
     for(NfpSession *s=nfp_sessions;s;s=s->next) {
-        KObject *event=handle_get(s->event[activated?0:1]);
-        if(event && event->type==KOBJ_EVENT) kernel_signal(event);
+        KObject *activate=handle_get(s->event[0]),*deactivate=handle_get(s->event[1]);
+        // Clear the opposite manual-reset level while holding the same kernel lock.
+        if(activate && activate->type==KOBJ_EVENT) activate->signaled=present;
+        if(deactivate && deactivate->type==KOBJ_EVENT) deactivate->signaled=state.state==3;
+        if(present && activate && activate->type==KOBJ_EVENT) kernel_signal(activate);
+        if(state.state==3 && deactivate && deactivate->type==KOBJ_EVENT) kernel_signal(deactivate);
     }
     pthread_mutex_unlock(&g_klock);pthread_mutex_unlock(&nfp_lock);
 }
+static void nfp_notify(int activated) {(void)activated;nfp_sync_events();}
 static void nfp_close(Service *service) {
     NfpSession *s=service->state;pthread_mutex_lock(&nfp_lock);
     NfpSession **link=&nfp_sessions;while(*link && *link!=s) link=&(*link)->next;
@@ -98,15 +106,15 @@ static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
         if(req->data_size<8 || IN(uint64_t,0)!=1) {resp->result=ND_NFP_NOT_FOUND;return;}
     }
     switch(req->cmd) {
-    case 0: nd_amiibo_set_notify(nfp_notify);nd_amiibo_initialize(1);break;
-    case 1: nd_amiibo_stop();nd_amiibo_initialize(0);break;
+    case 0: nd_amiibo_set_notify(nfp_notify);nd_amiibo_initialize(1);nfp_sync_events();break;
+    case 1: nd_amiibo_stop();nd_amiibo_initialize(0);nfp_sync_events();break;
     case 2: {
         IpcBuf *b=out_buf(req,0);int count=state.initialized && b && b->size>=8;
         if(count) {uint64_t id=1;if(!nd_nfp_write(b->addr,&id,8,GUEST_LO,GUEST_HI)) {resp->result=ND_NFP_NOT_FOUND;break;}}
         OUT(int32_t,0)=count;resp_size(resp,4);break;
     }
-    case 3: resp->result=nd_amiibo_start();break;
-    case 4: resp->result=nd_amiibo_stop();break;
+    case 3: resp->result=nd_amiibo_start();nfp_sync_events();break;
+    case 4: resp->result=nd_amiibo_stop();nfp_sync_events();break;
     case 5: resp->result=nd_amiibo_mount();break;
     case 6: resp->result=nd_amiibo_unmount();break;
     case 13: case 16: {
@@ -123,9 +131,9 @@ static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
         pthread_mutex_lock(&nfp_lock);
         if(session->event[index]) kernel_close_handle(session->event[index]);
         session->event[index]=w;pthread_mutex_unlock(&nfp_lock);
-        if(index==2 || (index==0 && (state.state==2 || state.state==4))) {
+        if(index==2) {
             klock();kernel_signal(handle_get(w));pthread_mutex_unlock(&g_klock);
-        }
+        } else nfp_sync_events();
         resp->copy_handles[resp->ncopy++]=r;break;
     }
     case 19: OUT(uint32_t,0)=state.initialized;resp_size(resp,4);break;
