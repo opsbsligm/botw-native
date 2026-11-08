@@ -63,3 +63,27 @@ static inline NdTouchResult nd_mouse_route(NdMouse *s,int type,uint64_t device,
     }
     return r;
 }
+
+/* ImGui has one pointer. Native touch and an ordinary mouse cannot both own
+ * its pressed state, even when Gamescope does not mark a mouse as synthetic. */
+typedef struct {NdTouch touch;NdMouse mouse;} NdPointer;
+static inline void nd_pointer_reset(NdPointer *s) {nd_touch_reset(&s->touch);nd_mouse_reset(&s->mouse);}
+static inline int nd_pointer_active(const NdPointer *s) {return s->touch.active || s->mouse.ui.active;}
+static inline NdTouchResult nd_pointer_touch(NdPointer *s,int type,uint64_t device,uint64_t finger,
+                                             float x,float y,float width,float height,int hit,int open) {
+    if(s->mouse.ui.active) {NdTouchResult r={1,0,0,0,0,0};return r;}
+    return nd_touch_route(&s->touch,type,device,finger,x,y,width,height,hit,open);
+}
+static inline NdTouchResult nd_pointer_mouse(NdPointer *s,int type,uint64_t device,
+                                             float x,float y,float width,float height,int hit,int open) {
+    if(s->touch.active) {
+        if(type==ND_TOUCH_UP && s->mouse.outside && s->mouse.outside_device==device) s->mouse.outside=0;
+        NdTouchResult r={1,0,0,0,0,0};return r;
+    }
+    return nd_mouse_route(&s->mouse,type,device,x,y,width,height,hit,open);
+}
+/* The return value requests cancellation of the shared UI pointer. */
+static inline int nd_pointer_remove_mouse(NdPointer *s,uint64_t device) {
+    int owned=nd_mouse_remove(&s->mouse,device);
+    return owned && !s->touch.active;
+}
