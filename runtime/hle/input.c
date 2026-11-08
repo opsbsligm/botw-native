@@ -123,6 +123,8 @@ static void recompute_pad(void) {
               -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY), g_settings.stick_deadzone[1]);
 }
 
+void input_gamepad_refresh(void) {recompute_pad();}
+
 // Forget held keys (the menu took focus); the gamepad is re-read on its next event.
 void input_reset(void) {
     memset(keys_down, 0, sizeof keys_down);

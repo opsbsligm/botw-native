@@ -14,6 +14,7 @@
 
 #include "i18n.h"
 #include "imgui.h"
+#include "../native_imgui_input.h"
 #include "option_rows.h"
 #include "imgui_internal.h"  // (NavCursorVisible)
 #include "osk.h"
@@ -73,10 +74,16 @@ static std::atomic<float> touch_width{0},touch_height{0};
 static std::atomic<bool> g_pointer_captured{false};
 static std::atomic<bool> g_pointer_reset{false};
 
+// Caller holds q_lock. Drop the whole current pointer batch on overflow.
+static void reset_queue_locked() {
+    q_events.clear();q_reset=true;g_pointer_reset=true;
+    suppressed_pad_buttons.fetch_or(held_pad_buttons.load());input_reset();input_gamepad_refresh();
+    g_pointer_captured=false;
+}
 static void push(const QEvent &e) {
     pthread_mutex_lock(&q_lock);
     if(q_events.size()<512) q_events.push_back(e);
-    else {q_events.clear();q_reset=true;}
+    else reset_queue_locked();
     pthread_mutex_unlock(&q_lock);
 }
 
@@ -191,10 +198,29 @@ extern "C" bool menu_cursor_free(void) { return g_cursor_free.load(); }
 
 static void pointer_event(const NdTouchResult &r,int type,ImGuiMouseSource source) {
     if(!r.emit) return;
-    QEvent q={};q.kind=QEvent::MOUSE_SOURCE;q.button=source;push(q);
-    if(r.cancel) {q.kind=QEvent::MOUSE_CANCEL;push(q);return;}
-    q.kind=QEvent::MOUSE_POS;q.x=r.x;q.y=r.y;push(q);
-    if(type!=ND_TOUCH_MOVE) {q.kind=QEvent::MOUSE_BUTTON;q.button=0;q.down=r.down;push(q);}
+    QEvent batch[3]={};int count=2;
+    batch[0].kind=QEvent::MOUSE_SOURCE;batch[0].button=source;
+    if(r.cancel) batch[1].kind=QEvent::MOUSE_CANCEL;
+    else {
+        batch[1].kind=QEvent::MOUSE_POS;batch[1].x=r.x;batch[1].y=r.y;
+        if(type!=ND_TOUCH_MOVE) {batch[2].kind=QEvent::MOUSE_BUTTON;batch[2].button=0;batch[2].down=r.down;count=3;}
+    }
+    pthread_mutex_lock(&q_lock);
+    if(g_pointer_reset.load()) g_pointer_captured=false;
+    else if(q_events.size()+(size_t)count<=512) q_events.insert(q_events.end(),batch,batch+count);
+    else reset_queue_locked();
+    pthread_mutex_unlock(&q_lock);
+}
+static void publish_pointer_capture(const NdPointer &pointer) {
+    bool active=nd_pointer_active(&pointer),previous=g_pointer_captured.load();
+    if(active && !previous) {
+        g_pointer_captured=true;menu_absorb_pad_buttons();input_reset();input_gamepad_refresh();
+    } else if(!active) {
+        // Suppression must reach both cached gamepad representations before
+        // the guest can observe capture ending, even without a new pad event.
+        if(previous) input_gamepad_refresh();
+        g_pointer_captured=false;
+    }
 }
 
 bool menu_handle_event(const SDL_Event *e) {
@@ -207,7 +233,7 @@ bool menu_handle_event(const SDL_Event *e) {
                  e->type==SDL_EVENT_FINGER_UP?ND_TOUCH_UP:ND_TOUCH_CANCEL;
         NdTouchResult r=nd_pointer_touch(&pointer,type,e->tfinger.touchID,e->tfinger.fingerID,e->tfinger.x,e->tfinger.y,
                                      w,h,control_bar_hit(e->tfinger.x*w,e->tfinger.y*h),capturing());
-        g_pointer_captured=nd_pointer_active(&pointer);
+        publish_pointer_capture(pointer);
         pointer_event(r,type,ImGuiMouseSource_TouchScreen);
         return r.consumed;
     }
@@ -228,7 +254,7 @@ bool menu_handle_event(const SDL_Event *e) {
             uint32_t bit=1u<<e->gbutton.button;
             if(e->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN) held_pad_buttons.fetch_or(bit);
             else {held_pad_buttons.fetch_and(~bit);suppressed_pad_buttons.fetch_and(~bit);}
-            if(capturing()) menu_absorb_pad_buttons();
+            if(capturing() || g_pointer_captured.load()) menu_absorb_pad_buttons();
         }
     } else if(e->type==SDL_EVENT_GAMEPAD_REMOVED || e->type==SDL_EVENT_WINDOW_FOCUS_LOST) {
         held_pad_buttons=0;suppressed_pad_buttons=0;nd_pointer_reset(&pointer);g_pointer_captured=false;
@@ -236,7 +262,7 @@ bool menu_handle_event(const SDL_Event *e) {
     } else if(e->type==SDL_EVENT_MOUSE_REMOVED) {
         // Removing a transient touch/mouse device must not reset held-pad
         // suppression for a controller that remains connected.
-        bool owned=nd_pointer_remove_mouse(&pointer,e->mdevice.which);g_pointer_captured=nd_pointer_active(&pointer);
+        bool owned=nd_pointer_remove_mouse(&pointer,e->mdevice.which);publish_pointer_capture(pointer);
         if(owned) {QEvent q={};q.kind=QEvent::MOUSE_CANCEL;push(q);}
     }
     // a binding capture (Controls tab, or the game's Options screen) takes the press
@@ -336,7 +362,7 @@ bool menu_handle_event(const SDL_Event *e) {
         {
             float x=e->motion.x*g_pixel_density,y=e->motion.y*g_pixel_density;
             NdTouchResult r=nd_pointer_mouse(&pointer,ND_TOUCH_MOVE,e->motion.which,x,y,touch_width.load(),touch_height.load(),control_bar_hit(x,y),capturing());
-            g_pointer_captured=nd_pointer_active(&pointer);
+            publish_pointer_capture(pointer);
             pointer_event(r,ND_TOUCH_MOVE,ImGuiMouseSource_Mouse);return r.consumed;
         }
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -344,7 +370,7 @@ bool menu_handle_event(const SDL_Event *e) {
             float x=e->button.x*g_pixel_density,y=e->button.y*g_pixel_density;
             int type=e->type==SDL_EVENT_MOUSE_BUTTON_DOWN?ND_TOUCH_DOWN:ND_TOUCH_UP;
             NdTouchResult r=nd_pointer_mouse(&pointer,type,e->button.which,x,y,touch_width.load(),touch_height.load(),control_bar_hit(x,y),capturing());
-            g_pointer_captured=nd_pointer_active(&pointer);
+            publish_pointer_capture(pointer);
             pointer_event(r,type,ImGuiMouseSource_Mouse);return r.consumed;
         }
         {QEvent q={};q.kind=QEvent::MOUSE_SOURCE;q.button=ImGuiMouseSource_Mouse;push(q);}
@@ -507,17 +533,18 @@ static void init(void) {
 }
 
 static void drain_events(ImGuiIO &io) {
-    if(q_reset.exchange(false)) {io.ClearInputKeys();io.ClearInputMouse();}
     pthread_mutex_lock(&q_lock);
+    bool reset=q_reset.exchange(false);
     std::vector<QEvent> ev;
     ev.swap(q_events);
     pthread_mutex_unlock(&q_lock);
+    if(reset) nd_imgui_reset_input(io);
     for (const QEvent &q : ev) {
         switch (q.kind) {
         case QEvent::KEY: io.AddKeyEvent(q.key, q.down); break;
         case QEvent::ANALOG: io.AddKeyAnalogEvent(q.key, q.value > 0.1f, q.value); break;
         case QEvent::MOUSE_SOURCE: io.AddMouseSourceEvent((ImGuiMouseSource)q.button); break;
-        case QEvent::MOUSE_CANCEL: io.ClearInputMouse();io.AddMousePosEvent(-FLT_MAX,-FLT_MAX);break;
+        case QEvent::MOUSE_CANCEL: nd_imgui_cancel_pointer(io);break;
         case QEvent::MOUSE_POS: io.AddMousePosEvent(q.x, q.y); break;
         case QEvent::MOUSE_BUTTON: io.AddMouseButtonEvent(q.button, q.down); break;
         case QEvent::WHEEL: io.AddMouseWheelEvent(q.x, q.y); break;
@@ -995,9 +1022,8 @@ RT_ON_RESET(menu_reset) {
     set_open(false);
     g_kbd = 0;
     osk_cancel();
-    g_pointer_reset=true;g_pointer_captured=false;q_reset=true;
     pthread_mutex_lock(&q_lock);
-    q_events.clear();
+    q_events.clear();q_reset=true;g_pointer_reset=true;g_pointer_captured=false;
     pthread_mutex_unlock(&q_lock);
 }
 

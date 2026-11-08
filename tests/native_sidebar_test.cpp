@@ -2,6 +2,7 @@
 // Exercise the production chrome with actual ImGui mouse/touch-style events.
 #include "native_sidebar_ui.h"
 #include "native_touch.h"
+#include "native_imgui_input.h"
 #include "imgui_internal.h"
 #include <cassert>
 #include <cstdio>
@@ -20,6 +21,8 @@ static NdPointer pointer;
 static void frame() {
     boxes.clear();items.clear();ImGui::NewFrame();bool toggle=false;ImVec2 lo,hi;
     if(nd_sidebar_begin(sidebar,opened,anchor,"Native Deck",false,&toggle)) {full_frames++;ImGui::TextUnformatted("Actual setting content");}
+    assert(ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w==1);
+    assert(ImGui::GetStyle().Colors[ImGuiCol_PopupBg].w==1);
     nd_sidebar_end(sidebar,opened,&anchor,false,&lo,&hi);
     if(toggle) opened=!opened;
     ImGui::Render();
@@ -58,6 +61,22 @@ static void scenario(float width,float height) {
     route(ND_TOUCH_MOVE,ImVec2(60,60));frame();route(ND_TOUCH_UP,ImVec2(60,60));frame();
     assert(!opened && anchor==0);
     tap("##edge-badge");assert(opened && sidebar.layer==1);tap("Hide");assert(!opened);
+    // Cancel queued DOWN without losing another input source's release.
+    io.AddKeyEvent(ImGuiKey_F24,true);frame();assert(ImGui::IsKeyDown(ImGuiKey_F24));
+    ImVec2 badge=items["##edge-badge"].GetCenter();
+    io.AddMousePosEvent(badge.x,badge.y);io.AddMouseButtonEvent(0,true);
+    io.AddKeyEvent(ImGuiKey_F24,false);nd_imgui_cancel_pointer(io);frame();frame();
+    assert(!io.MouseDown[0] && !ImGui::IsKeyDown(ImGuiKey_F24) && !opened);
+    // Also discard mouse events left for another frame by ImGui's trickling.
+    io.AddMousePosEvent(badge.x,badge.y);io.AddMouseButtonEvent(0,true);frame();
+    io.AddMouseButtonEvent(0,false);io.AddMouseButtonEvent(0,true);
+    nd_imgui_cancel_pointer(io);frame();frame();assert(!io.MouseDown[0] && !opened);
+    // Full reset is a barrier before, not after, a fresh gesture in that batch.
+    io.AddMousePosEvent(badge.x,badge.y);io.AddMouseButtonEvent(0,true);io.AddKeyEvent(ImGuiKey_F24,true);
+    nd_imgui_reset_input(io);assert(io.Ctx->InputEventsQueue.empty());
+    frame();assert(!io.MouseDown[0] && !ImGui::IsKeyDown(ImGuiKey_F24));
+    tap("##edge-badge");assert(opened && sidebar.layer==1);tap("Hide");assert(!opened);
+    puts("Queued pointer cancellation preserves key releases; full reset accepts fresh gestures PASS");
     ImGui::DestroyContext();
 }
 int main() {scenario(1280,720);scenario(1280,800);scenario(1920,1080);scenario(800,480);puts("Production three-stage chrome, direct badge drag, bounds and balanced child stack passed");}
