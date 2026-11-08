@@ -235,7 +235,7 @@ bool menu_handle_event(const SDL_Event *e) {
     } else if(e->type==SDL_EVENT_MOUSE_REMOVED) {
         // Removing a transient touch/mouse device must not reset held-pad
         // suppression for a controller that remains connected.
-        bool owned=mouse.ui.active;nd_mouse_reset(&mouse);g_pointer_captured=touch.active;
+        bool owned=nd_mouse_remove(&mouse,e->mdevice.which);g_pointer_captured=touch.active || mouse.ui.active;
         if(owned) {QEvent q={};q.kind=QEvent::MOUSE_CANCEL;push(q);}
     }
     // a binding capture (Controls tab, or the game's Options screen) takes the press

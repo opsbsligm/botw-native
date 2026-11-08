@@ -31,6 +31,13 @@ static inline NdTouchResult nd_touch_route(NdTouch *s,int type,uint64_t device,u
  * of its old bounds. A press begun in the world must stay with the world. */
 typedef struct {NdTouch ui;uint64_t outside_device;int outside;} NdMouse;
 static inline void nd_mouse_reset(NdMouse *s) {nd_touch_reset(&s->ui);s->outside=0;}
+/* Hot-unplug affects only gestures owned by the removed device. */
+static inline int nd_mouse_remove(NdMouse *s,uint64_t device) {
+    int owned=s->ui.active && s->ui.device==device;
+    if(owned) nd_touch_reset(&s->ui);
+    if(s->outside && s->outside_device==device) s->outside=0;
+    return owned;
+}
 static inline NdTouchResult nd_mouse_route(NdMouse *s,int type,uint64_t device,
                                           float x,float y,float width,float height,int hit,int open) {
     NdTouchResult r={0,0,0,0,0,0};

@@ -71,6 +71,20 @@ int main(void) {
  r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,50,50,1280,720,0,1);assert(r.emit && s.ui.active);
  r=nd_mouse_route(&s,ND_TOUCH_UP,7,-20,900,1280,720,0,1);
  assert(r.consumed && r.emit && r.x==0 && r.y==720 && !s.ui.active);
+ // Another device disappearing cannot cancel an active UI drag or world press.
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,1240,680,1280,720,1,0);assert(s.ui.active);
+ assert(!nd_mouse_remove(&s,8) && s.ui.active && s.ui.device==7);
+ r=nd_mouse_route(&s,ND_TOUCH_MOVE,7,60,60,1280,720,0,0);
+ assert(r.consumed && r.emit && s.ui.active);
+ assert(nd_mouse_remove(&s,7) && !s.ui.active && !s.outside);
+ assert(!nd_mouse_remove(&s,7));
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,60,60,1280,720,0,0);assert(s.outside);
+ assert(!nd_mouse_remove(&s,8) && s.outside && s.outside_device==7);
+ assert(!nd_mouse_remove(&s,7) && !s.outside);
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,8,1240,680,1280,720,1,0);
+ assert(r.consumed && r.emit && s.ui.active && s.ui.device==8);
+ r=nd_mouse_route(&s,ND_TOUCH_UP,8,60,60,1280,720,0,0);
+ assert(r.consumed && r.emit && !s.ui.active);
  return 0;
 }
 """)
