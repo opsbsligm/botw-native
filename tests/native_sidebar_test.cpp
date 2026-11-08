@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Exercise the production chrome with actual ImGui mouse/touch-style events.
 #include "native_sidebar_ui.h"
+#include "native_touch.h"
 #include "imgui_internal.h"
 #include <cassert>
 #include <cstdio>
@@ -15,6 +16,7 @@ const char *ImGuiTestEngine_FindItemDebugLabel(ImGuiContext*,ImGuiID) {return nu
 static NdSidebar sidebar;
 static bool opened;
 static int anchor=4,full_frames;
+static NdMouse pointer;
 static void frame() {
     boxes.clear();items.clear();ImGui::NewFrame();bool toggle=false;ImVec2 lo,hi;
     if(nd_sidebar_begin(sidebar,opened,anchor,"Native Deck",false,&toggle)) {full_frames++;ImGui::TextUnformatted("Actual setting content");}
@@ -28,6 +30,15 @@ static void tap(const char *label) {
     assert(items.count(label));ImVec2 p=items[label].GetCenter();auto &io=ImGui::GetIO();
     io.AddMousePosEvent(p.x,p.y);frame();io.AddMouseButtonEvent(0,true);frame();
     io.AddMouseButtonEvent(0,false);frame();frame();
+}
+static void route(int type,ImVec2 p) {
+    auto &io=ImGui::GetIO();auto size=io.DisplaySize;
+    bool hit=items.count("##edge-badge") && items["##edge-badge"].Contains(p);
+    NdTouchResult r=nd_mouse_route(&pointer,type,7,p.x,p.y,size.x,size.y,hit,opened);
+    assert(r.consumed && r.emit);
+    io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);io.AddMousePosEvent(r.x,r.y);
+    if(type!=ND_TOUCH_MOVE) io.AddMouseButtonEvent(0,r.down);
+    frame();
 }
 static void scenario(float width,float height) {
     ImGui::CreateContext();auto &io=ImGui::GetIO();io.IniFilename=nullptr;io.DisplaySize=ImVec2(width,height);io.DeltaTime=1.f/60;
@@ -43,8 +54,8 @@ static void scenario(float width,float height) {
     tap("Hide");assert(!opened);
     // Drag the collapsed badge to the opposite corner without opening it.
     assert(items.count("##edge-badge"));ImVec2 origin=items["##edge-badge"].GetCenter();
-    io.AddMousePosEvent(origin.x,origin.y);frame();io.AddMouseButtonEvent(0,true);frame();
-    io.AddMousePosEvent(60,60);frame();frame();io.AddMouseButtonEvent(0,false);frame();frame();
+    pointer=NdMouse();route(ND_TOUCH_MOVE,origin);route(ND_TOUCH_DOWN,origin);
+    route(ND_TOUCH_MOVE,ImVec2(60,60));frame();route(ND_TOUCH_UP,ImVec2(60,60));frame();
     assert(!opened && anchor==0);
     tap("##edge-badge");assert(opened && sidebar.layer==1);tap("Hide");assert(!opened);
     ImGui::DestroyContext();

@@ -32,3 +32,47 @@ int main(void) {
 """)
             subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(HOST),str(s),'-lm','-o',str(exe)],check=True)
             subprocess.run([str(exe)],check=True,timeout=10)
+
+    def test_mouse_fallback_keeps_badge_gesture_and_world_origin(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            p=Path(tmp);s=p/'mouse.c';exe=p/'mouse'
+            s.write_text(r"""
+#include "native_touch.h"
+#include <assert.h>
+int main(void) {
+ NdMouse s={0};NdTouchResult r;
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,1240,680,1280,720,1,0);
+ assert(r.consumed && r.emit && r.down && s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_MOVE,7,60,60,1280,720,0,0);
+ assert(r.consumed && r.emit && r.x==60 && r.y==60 && s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_UP,8,60,60,1280,720,0,0);
+ assert(r.consumed && !r.emit && s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_UP,7,60,60,1280,720,0,0);
+ assert(r.consumed && r.emit && !r.down && !s.ui.active);
+ // Starting outside cannot steal the game's drag or release at the badge.
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,60,60,1280,720,0,0);
+ assert(!r.consumed && !r.emit && s.outside);
+ r=nd_mouse_route(&s,ND_TOUCH_MOVE,7,1240,680,1280,720,1,0);
+ assert(!r.consumed && !r.emit && !s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_UP,7,1240,680,1280,720,1,0);
+ assert(!r.consumed && !r.emit && !s.outside);
+ r=nd_mouse_route(&s,ND_TOUCH_MOVE,7,1240,680,1280,720,1,0);
+ assert(r.consumed && r.emit && !s.ui.active); // ordinary hover
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,1240,680,1280,720,1,0);assert(s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_MOVE,7,NAN,0,1280,720,0,0);
+ assert(r.cancel && !s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,1240,680,1280,720,1,0);assert(s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_CANCEL,7,0,0,1280,720,0,0);
+ assert(r.emit && r.cancel && !s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,1240,680,1280,720,1,0);assert(s.ui.active);
+ nd_mouse_reset(&s);assert(!s.ui.active && !s.outside);
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,0,0,0,720,1,0);assert(!r.emit);
+ nd_mouse_reset(&s);
+ r=nd_mouse_route(&s,ND_TOUCH_DOWN,7,50,50,1280,720,0,1);assert(r.emit && s.ui.active);
+ r=nd_mouse_route(&s,ND_TOUCH_UP,7,-20,900,1280,720,0,1);
+ assert(r.consumed && r.emit && r.x==0 && r.y==720 && !s.ui.active);
+ return 0;
+}
+""")
+            subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(HOST),str(s),'-lm','-o',str(exe)],check=True)
+            subprocess.run([str(exe)],check=True,timeout=10)

@@ -25,3 +25,34 @@ static inline NdTouchResult nd_touch_route(NdTouch *s,int type,uint64_t device,u
     if(type==ND_TOUCH_UP || r.cancel) s->active=0;
     return r;
 }
+
+/* Gamescope/X11 may expose a touchscreen gesture as ordinary mouse events.
+ * Retain its initial owner, including when a collapsed badge is dragged out
+ * of its old bounds. A press begun in the world must stay with the world. */
+typedef struct {NdTouch ui;uint64_t outside_device;int outside;} NdMouse;
+static inline void nd_mouse_reset(NdMouse *s) {nd_touch_reset(&s->ui);s->outside=0;}
+static inline NdTouchResult nd_mouse_route(NdMouse *s,int type,uint64_t device,
+                                          float x,float y,float width,float height,int hit,int open) {
+    NdTouchResult r={0,0,0,0,0,0};
+    int valid=isfinite(x) && isfinite(y) && isfinite(width) && isfinite(height) && width>0 && height>0;
+    if(type==ND_TOUCH_CANCEL) {
+        if(s->ui.active) r=nd_touch_route(&s->ui,type,s->ui.device,0,0,0,1,1,0,open);
+        s->outside=0;return r;
+    }
+    if(s->outside) {
+        if(type==ND_TOUCH_UP && device==s->outside_device) s->outside=0;
+        r.consumed=open;return r;
+    }
+    if(s->ui.active || type==ND_TOUCH_DOWN) {
+        r=nd_touch_route(&s->ui,type,device,0,valid?x/width:NAN,valid?y/height:NAN,
+                         valid?width:0,valid?height:0,hit,open);
+        if(type==ND_TOUCH_DOWN && !r.consumed) {s->outside=1;s->outside_device=device;}
+        return r;
+    }
+    /* Hover and an unpaired release may update an open UI, but never start
+       a gesture or steal a world release just because it ends on the badge. */
+    if(valid && (open || (hit && type==ND_TOUCH_MOVE))) {
+        r.consumed=r.emit=1;r.x=fminf(fmaxf(x,0),width);r.y=fminf(fmaxf(y,0),height);
+    }
+    return r;
+}
