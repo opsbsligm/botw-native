@@ -36,6 +36,21 @@ def xdg(variable, default):
     return Path(value) if value.startswith('/') else Path.home() / default
 
 
+def touchscreen_priority(environment, hardware=Path('/sys/class/dmi/id')):
+    """Keep Gamescope touch coordinates absolute on Valve's built-in screen."""
+    override = environment.get('SAVAGEWIND_TOUCH_PRIORITY')
+    if override is not None:
+        if override not in ('0', '1'):
+            raise ValueError('SAVAGEWIND_TOUCH_PRIORITY must be 0 or 1')
+        return override
+    try:
+        vendor = (hardware / 'sys_vendor').read_text().strip()
+        product = (hardware / 'product_name').read_text().strip()
+    except OSError:
+        return '0'
+    return '1' if vendor == 'Valve' and product in ('Jupiter', 'Galileo') else '0'
+
+
 
 MAX_SAVE_BYTES = 512 * 1024 * 1024
 
@@ -147,6 +162,7 @@ def main():
         backup_saves(data / 'save', data / 'native-save-backups')
         env = dict(os.environ, LD_LIBRARY_PATH=str(ROOT / 'lib'))
         env.update(SAVAGEWIND_DATA_ROOT=str(data), SAVAGEWIND_FONT=str(ROOT / 'wqy-microhei.ttc'))
+        env['SAVAGEWIND_TOUCH_PRIORITY'] = touchscreen_priority(env)
         env.setdefault('SAVAGEWIND_FRAMEPACE', '1')
         env['NATIVE_SESSION_FD'] = str(lock.fileno())
         cmd = [sys.executable, str(ROOT / 'motion_session.py'), str(ROOT / 'game.sh'), *game_args]

@@ -964,7 +964,12 @@ static void tab_about(void) {
     hint("The d-pad (and the arrow keys) also move like the left stick while the stick is at rest.");
     ImGui::Spacing();
     header("Mouse");
+    ImGui::BeginDisabled(input_touch_priority());
     toggle("Mouse camera", &g_settings.mouse_camera);
+    ImGui::EndDisabled();
+    if(input_touch_priority()) ImGui::TextWrapped("%s",!strncmp(ui_lang(),"zh",2)?
+        "触屏优先：鼠标用于界面，游戏视角使用摇杆与原生体感。":
+        "Touchscreen mode: the pointer controls the UI; sticks and native motion control the game camera.");
     hint("The mouse turns the camera. Esc releases the cursor; settings open from the edge handle.");
     float sens = roundf(g_settings.mouse_sens * 100);
     if (opt_slider("Mouse sensitivity", &sens, 10, 1000, 5, MOUSE_SENS_DEFAULT * 100, "%g%%", "How fast the mouse turns the camera."))
