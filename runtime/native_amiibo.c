@@ -100,13 +100,22 @@ unsigned nd_amiibo_tag_info(void *out,size_t size) {
     }
     pthread_mutex_unlock(&mutex);return result;
 }
-unsigned nd_amiibo_model_info(void *out,size_t size) {
-    if(!out || size<0x40) return ND_NFP_NOT_FOUND;
+unsigned nd_amiibo_deliver_model_info(NdAmiiboModelWriter writer,void *context) {
+    if(!writer) return ND_NFP_NOT_FOUND;
     pthread_mutex_lock(&mutex);unsigned result=ND_NFP_NOT_FOUND;
     if(state.loaded && state.state==4) {
-        unsigned char *p=out;memset(p,0,0x40);memcpy(p,tag+0x54,3);p[3]=tag[0x5a];p[4]=tag[0x59];p[5]=tag[0x58];p[6]=tag[0x57];state.model_reads++;state.current_identity_read=1;result=0;
+        unsigned char metadata[0x40]={0};memcpy(metadata,tag+0x54,3);
+        metadata[3]=tag[0x5a];metadata[4]=tag[0x59];metadata[5]=tag[0x58];metadata[6]=tag[0x57];
+        if(writer(context,metadata,sizeof metadata)) {
+            state.model_reads++;state.current_identity_read=1;result=0;
+        }
     }
     pthread_mutex_unlock(&mutex);return result;
+}
+static int model_copy(void *out,const void *data,size_t size) {memcpy(out,data,size);return 1;}
+unsigned nd_amiibo_model_info(void *out,size_t size) {
+    if(!out || size<0x40) return ND_NFP_NOT_FOUND;
+    return nd_amiibo_deliver_model_info(model_copy,out);
 }
 static int name_compare(const void *a,const void *b) {return strcmp(a,b);}
 int nd_amiibo_library(const char *game,char folder[4096],char names[ND_AMIIBO_MAX_FILES][256]) {

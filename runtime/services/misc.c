@@ -100,6 +100,10 @@ static void nfp_close(Service *service) {
     for(int i=0;i<3;i++) if(s->event[i]) kernel_close_handle(s->event[i]);
     pthread_mutex_unlock(&nfp_lock);free(s);
 }
+static int nfp_model_write(void *context,const void *data,size_t bytes) {
+    const IpcBuf *buffer=context;
+    return buffer && buffer->size>=bytes && nd_nfp_write(buffer->addr,data,bytes,GUEST_LO,GUEST_HI);
+}
 static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
     NfpSession *session=service->state;NdAmiiboSnapshot state;nd_amiibo_snapshot(&state);
     if(req->cmd!=0 && req->cmd!=1 && req->cmd!=2 && req->cmd!=19 && req->cmd!=23) {
@@ -117,13 +121,20 @@ static void nfp_user(Service *service,IpcReq *req,IpcResp *resp) {
     case 4: resp->result=nd_amiibo_stop();nfp_sync_events();break;
     case 5: resp->result=nd_amiibo_mount();break;
     case 6: resp->result=nd_amiibo_unmount();break;
-    case 13: case 16: {
-        IpcBuf *b=out_buf(req,0);size_t need=req->cmd==13?0x58:0x40;
+    case 13: {
+        IpcBuf *b=out_buf(req,0);size_t need=0x58;
         if(!b || b->size<need) {resp->result=ND_NFP_NOT_FOUND;break;}
         unsigned char metadata[0x58];
-        resp->result=req->cmd==13?nd_amiibo_tag_info(metadata,sizeof metadata):nd_amiibo_model_info(metadata,sizeof metadata);
+        resp->result=nd_amiibo_tag_info(metadata,sizeof metadata);
         if(!resp->result && !nd_nfp_write(b->addr,metadata,need,GUEST_LO,GUEST_HI)) resp->result=ND_NFP_NOT_FOUND;
         break;
+    }
+    case 16: {
+        IpcBuf *b=out_buf(req,0);
+        if(!b || b->size<0x40) {resp->result=ND_NFP_NOT_FOUND;break;}
+        /* Bind the same identity through complete guest delivery. A failed or
+         * partial write must not create a success receipt for this scan. */
+        resp->result=nd_amiibo_deliver_model_info(nfp_model_write,b);break;
     }
     case 17: case 18: case 23: {
         int index=req->cmd==17?0:req->cmd==18?1:2;uint32_t w,r;

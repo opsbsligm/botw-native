@@ -28,6 +28,10 @@ unsigned nd_amiibo_mount(void);
 unsigned nd_amiibo_unmount(void);
 unsigned nd_amiibo_tag_info(void *out,size_t size);
 unsigned nd_amiibo_model_info(void *out,size_t size);
+/* Synchronous bounded delivery under the reader mutex. The writer must not
+ * reenter reader/notification APIs; only a complete write acknowledges a read. */
+typedef int (*NdAmiiboModelWriter)(void *context,const void *data,size_t size);
+unsigned nd_amiibo_deliver_model_info(NdAmiiboModelWriter writer,void *context);
 // Bounded local library listing: filenames only, sorted, no symlinks or recursion.
 int nd_amiibo_library(const char *game,char folder[4096],char names[ND_AMIIBO_MAX_FILES][256]);
 #ifdef __cplusplus
