@@ -53,7 +53,18 @@ static int nd_help_text_impl(uint8_t *b, size_t n, const char labels[4]) {
     }
     return 12;
 }
+#include "deck_help_geometry.h"
 static int nd_help_text(uint8_t *b, size_t n, const char labels[4]) {
-    if (nd_help_hash(b, n) != 0x7b02e47a0bf8c469ull) return 0;
-    return nd_help_text_impl(b, n, labels);
+    if(!b || n>128*1024) return 0;
+    uint64_t identity=nd_help_hash(b,n);
+    if(identity!=0x7b02e47a0bf8c469ull && identity!=0x582ade753eba17c0ull) return 0;
+    uint8_t *copy=malloc(n);if(!copy) return 0;memcpy(copy,b,n);
+    int okay=1;
+    if(identity==0x582ade753eba17c0ull) {
+        NdHelpPane panes[512];int count=nd_help_panes(copy,n,panes);
+        okay=count>=0 && nd_help_legacy_geometry(copy,panes,count) && nd_help_hash(copy,n)==0x7b02e47a0bf8c469ull;
+    }
+    int changed=okay && nd_help_geometry_impl(copy,n)==28?nd_help_text_impl(copy,n,labels):0;
+    if(changed==12) memcpy(b,copy,n);
+    free(copy);return changed;
 }

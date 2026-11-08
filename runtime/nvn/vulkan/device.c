@@ -2001,6 +2001,8 @@ void backend_clear_window(void) {
 
 int ui_run(void) {
     ui_window_init();
+    extern void input_mouse_update(SDL_Window *w);  // release relative mode as soon as a UI gesture takes ownership
+    extern void input_gamepad_refresh(void);  // consumed events still update the game's suppressed input cache
     atomic_store(&ui_ready, true);
     for (;;) {
         if (rt_reboot_requested()) return rt_reboot_requested();  // (runtime/main.c tears the game down)
@@ -2010,11 +2012,10 @@ int ui_run(void) {
                 LOG("window closed\n");
                 exit(0);
             }
-            if (menu_handle_event(&e)) continue;
+            if (menu_handle_event(&e)) {input_gamepad_refresh();input_mouse_update(window);continue;}
             input_handle_event(&e);
         }
         menu_apply_window_requests(window);
-        extern void input_mouse_update(SDL_Window *w);  // runtime/hle/input.c: hold the cursor while the game has it
         input_mouse_update(window);
     }
 }

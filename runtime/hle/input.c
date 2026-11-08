@@ -123,6 +123,8 @@ static void recompute_pad(void) {
               -SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY), g_settings.stick_deadzone[1]);
 }
 
+void input_gamepad_refresh(void) {recompute_pad();}
+
 // Forget held keys (the menu took focus); the gamepad is re-read on its next event.
 void input_reset(void) {
     memset(keys_down, 0, sizeof keys_down);
@@ -286,10 +288,23 @@ static void mouse_stick(int32_t *x, int32_t *y) {
 // Main thread, every window loop turn (runtime/nvn/vulkan/device.c ui_run): hold or free the cursor.
 extern bool menu_cursor_free(void);     // runtime/ui/menu.mm: Esc freed the cursor (a click in the window holds it)
 static bool win_focused = true;         // (main thread: window events and input_mouse_update)
+bool input_touch_priority(void) {
+    static _Atomic int enabled = -1;
+    int value = atomic_load_explicit(&enabled, memory_order_relaxed);
+    if (value < 0) {
+        const char *profile = getenv("SAVAGEWIND_TOUCH_PRIORITY");
+        value = profile && !strcmp(profile, "1");
+        atomic_store_explicit(&enabled, value, memory_order_relaxed);
+    }
+    return value != 0;
+}
 void input_mouse_update(SDL_Window *w) {
     vibration_update(pad, win_focused && !host_test);
     static bool cur;
-    bool want = w && win_focused && g_settings.mouse_camera && !menu_input_captured() && !menu_cursor_free() &&
+    // Gamescope exposes touch as ordinary mouse events. Relative mode destroys
+    // the absolute starting position before the sidebar can claim the gesture.
+    bool want = w && win_focused && g_settings.mouse_camera && !input_touch_priority() &&
+                !menu_input_captured() && !menu_cursor_free() &&
                 !getenv("SAVAGEWIND_INPUT") && !getenv("SAVAGEWIND_HOST_INPUT");
     if (want == cur) return;
     cur = want;

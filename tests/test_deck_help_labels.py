@@ -12,5 +12,5 @@ class HelpLabels(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             exe = Path(directory) / 'world-help'
             subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'runtime'),
-                str(ROOT / 'tests/deck_help_labels_test.c'), '-o', str(exe)], check=True)
+                str(ROOT / 'tests/deck_help_labels_test.c'), '-lm', '-o', str(exe)], check=True)
             subprocess.run([str(exe)], check=True, timeout=15)
