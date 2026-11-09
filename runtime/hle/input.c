@@ -370,6 +370,14 @@ static void note_family(void) {
     }
     if(pad && SDL_GetGamepadVendor(pad)==0x28de &&
        (SDL_GetGamepadProduct(pad)==0x1205 || SDL_GetGamepadProduct(pad)==0x11ff)) f=3;
+    // Steam Deck reports its own VID/PID only in its native input mode; in Xbox/Steam input
+    // modes SDL3 hands back a different product id (or an Xbox/PS gamepad type above). Match the
+    // controller name too, exactly as the validated TOTK baseline does, so the button prompts
+    // never fall back to Switch styling on the Deck.
+    if(pad && f != 3) {
+        const char *padname = SDL_GetGamepadName(pad);
+        if(padname && strstr(padname, "Steam Deck")) f = 3;
+    }
     if (f != pad_family) LOG("[input] button prompts: %s controller\n", f == 3 ? "Steam Deck" : f == 1 ? "Xbox" : f == 2 ? "PlayStation" : "Switch / other");
     pad_family = f;
 }
