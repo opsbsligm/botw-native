@@ -15,6 +15,7 @@
 #include "i18n.h"
 #include "imgui.h"
 #include "../native_imgui_input.h"
+#include "../native_sidebar_font.h"
 #include "option_rows.h"
 #include "imgui_internal.h"  // (NavCursorVisible)
 #include "osk.h"
@@ -1379,7 +1380,8 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
     if (overlay_enabled() && !open && !kbd && !sizes) {
-        ImGui::PushFont(g_menu_font);control_bar_draw(scale);ImGui::PopFont();
+        NdSidebarFont sidebar_font(g_menu_font,!strncmp(ui_lang(),"zh",2));
+        control_bar_draw(scale);
     }
 
     if (open) {

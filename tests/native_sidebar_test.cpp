@@ -3,6 +3,7 @@
 #include "native_sidebar_ui.h"
 #include "native_touch.h"
 #include "native_imgui_input.h"
+#include "native_sidebar_font.h"
 #include "imgui_internal.h"
 #include <cassert>
 #include <cstdio>
@@ -92,4 +93,37 @@ static void scenario(float width,float height) {
     puts("Queued pointer cancellation preserves key releases; full reset accepts fresh gestures PASS");
     ImGui::DestroyContext();
 }
-int main() {scenario(1280,720);scenario(1280,800);scenario(1920,1080);scenario(800,480);puts("Production three-stage chrome, direct badge drag, bounds and balanced child stack passed");}
+static void font_scope(float width,float height,float base_size,float inherited_scale,bool chinese) {
+    ImGui::CreateContext();auto &io=ImGui::GetIO();io.IniFilename=nullptr;
+    io.DisplaySize=ImVec2(width,height);io.DeltaTime=1.f/60;io.FontGlobalScale=inherited_scale;
+    ImFontConfig config;config.SizePixels=base_size;
+    ImFont *font=io.Fonts->AddFontDefault(&config);
+    config.SizePixels=34;ImFont *regular=io.Fonts->AddFontDefault(&config);
+    unsigned char *pixels;int w,h;io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
+    ImGui::NewFrame();ImGui::PushFont(regular);float before=ImGui::GetFontSize();
+    {
+        NdSidebarFont text(font,chinese);NdSidebar s;s.layer=2;bool toggle=false;ImVec2 lo,hi;
+        assert(nd_sidebar_begin(s,true,0,"Native Deck",false,&toggle));
+        float wanted=chinese?(height<720?height*2.f/45.f:32.f):(height<720?height/30.f:24.f);
+        assert(fabsf(ImGui::GetFontSize()-wanted)<.01f);
+        ImGui::TextUnformatted("Readable body text");
+        ImGui::OpenPopup("font-choice");
+        assert(ImGui::BeginPopup("font-choice"));
+        assert(fabsf(ImGui::GetFontSize()-wanted)<.01f);
+        ImGui::TextUnformatted("Choice inherits sidebar size");ImGui::EndPopup();
+        nd_sidebar_end(s,true,&anchor,false,&lo,&hi);
+    }
+    assert(io.FontGlobalScale==inherited_scale && ImGui::GetFont()==regular);
+    assert(fabsf(ImGui::GetFontSize()-before)<.01f);
+    ImGui::PopFont();ImGui::Render();assert(ImGui::GetDrawData()->CmdListsCount>0);
+    ImGui::DestroyContext();
+}
+int main() {
+    for(bool chinese:{false,true}) for(float size:{13.f,29.f}) for(float scale:{.45f,.74f,1.f}) {
+        font_scope(960,540,size,scale,chinese);font_scope(1280,720,size,scale,chinese);
+        font_scope(1280,800,size,scale,chinese);font_scope(1920,1080,size,scale,chinese);
+    }
+    puts("Sidebar body and popup font sizes independent of caller; original font and scale restored PASS");
+    scenario(1280,720);scenario(1280,800);scenario(1920,1080);scenario(800,480);
+    puts("Production three-stage chrome, direct badge drag, bounds and balanced child stack passed");
+}
