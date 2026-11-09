@@ -3,6 +3,11 @@
 // with SDL and the runtime's externs stubbed: the Steam Deck must stay in the Deck prompt family in its
 // native input mode AND in Xbox/Steam/PlayStation input modes (where the VID/PID changes and SDL reports
 // an Xbox/PS gamepad type, but the controller name still says "Steam Deck").
+// The production translation unit needs GNU source (pipe2 / process_vm_*); set it before the
+// first system include locks the feature-test set.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <assert.h>
 #include <string.h>
 
@@ -63,6 +68,13 @@ void motion_script(float a, float b, float c, float d) { (void)a; (void)b; (void
 int bind_pad_from_name(const char *name) { (void)name; return -1; }
 int bind_slot_from_name(const char *name) { (void)name; return -1; }
 
+// ---- __linux__ block: the menu-confirm path the production unit calls (see gamepad_buttons_now) ----
+bool gamelib_legacy_sdk7_profile(void) { return true; }
+bool nd_botw_menu_context(NdMenuRead read, void *user) { (void)read; (void)user; return false; }
+uint64_t nd_menu_confirm(NdMenuConfirm *st, bool active, unsigned held,
+                         uint64_t east_actions, uint64_t south_actions) {
+    (void)st; (void)active; (void)east_actions; (void)south_actions; return held;
+}
 static char fake_pad_storage[256];
 static void set_pad(int type, int vid, int pid, const char *name) {
     stub_type = type; stub_vid = vid; stub_pid = pid; stub_name = name;

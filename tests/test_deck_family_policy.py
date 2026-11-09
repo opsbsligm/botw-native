@@ -8,5 +8,5 @@ class FamilyPolicy(unittest.TestCase):
         cflags=shlex.split(subprocess.check_output(['pkg-config','--cflags','sdl3'],text=True))
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as d:
             exe=Path(d)/'family-policy'
-            subprocess.run(['clang','-std=gnu17','-march=x86-64-v3','-O0','-I',str(ROOT/'runtime'),*cflags,str(ROOT/'tests/deck_family_policy_test.c'),'-o',str(exe)],check=True,timeout=60)
+            subprocess.run(['clang','-std=gnu17','-march=x86-64-v3','-O0','-I',str(ROOT/'runtime'),*cflags,str(ROOT/'tests/deck_family_policy_test.c'),'-o',str(exe),'-lm','-lpthread'],check=True,timeout=60)
             subprocess.run([str(exe)],check=True,timeout=15)
