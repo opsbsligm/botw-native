@@ -1380,7 +1380,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
     if (overlay_enabled() && !open && !kbd && !sizes) {
-        NdSidebarFont sidebar_font(g_menu_font);
+        NdSidebarFont sidebar_font(g_menu_font,!strncmp(ui_lang(),"zh",2));
         control_bar_draw(scale);
     }
 

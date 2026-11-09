@@ -8,10 +8,11 @@
 class NdSidebarFont {
     float previous_scale;
 public:
-    explicit NdSidebarFont(ImFont *font) : previous_scale(ImGui::GetIO().FontGlobalScale) {
+    explicit NdSidebarFont(ImFont *font,bool chinese=false) : previous_scale(ImGui::GetIO().FontGlobalScale) {
         if(!font) font=ImGui::GetFont();
         ImGuiIO &io=ImGui::GetIO();
-        float pixels=24.f*std::min(1.f,io.DisplaySize.y/720.f);
+        // The system CJK face has a smaller ink area than its nominal line size.
+        float pixels=(chinese?32.f:24.f)*std::min(1.f,io.DisplaySize.y/720.f);
         io.FontGlobalScale=pixels/(font->FontSize*font->Scale);
         ImGui::PushFont(font);
     }
