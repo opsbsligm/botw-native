@@ -10,13 +10,20 @@
 
 _Static_assert(PADB_LTRIGGER == SDL_GAMEPAD_BUTTON_COUNT, "trigger pseudo-buttons follow SDL's buttons");
 
-// Defaults: Nintendo layout by position (east = A, south = B, north = X, west = Y), triggers = ZL / ZR.
-// Keyboard and mouse, laid out for BOTW the way PC action games are: WASD move (C held: walk), the mouse turns the
-// camera (I / J / K / L too, runtime/hle/input.c), Space = X (jump), Left Shift = B (sprint, back), E = A
-// (interact, confirm), left click = Y (attack), right click = ZL (shield, lock on), F = ZR (bow), Q = L (rune),
-// R = R (throw), Left Ctrl = left stick press (crouch), middle click = right stick press (look), Tab = Plus
-// (inventory), M = Minus (map), 1 / 2 / 3 / 4 = d-pad right / left / up / down (weapons, shields, runes, whistle:
-// the quick menus), T held = the mouse tilts the controller (motion puzzles, runtime/hle/motion.c). Esc and F1 stay the overlay menu's (runtime/ui/menu.mm).
+// Defaults: Xbox-style face buttons (same as TOTK). The controller's physical B (east/right)
+// drives game A, physical A (south/bottom) drives game B — the layout TOTK uses, so both
+// games respond identically. In menus, the policy in runtime/hle/input.c (SAVAGEWIND_MENU_CONFIRM)
+// swaps the semantics so the bottom button (physical A on Deck) confirms and the right button
+// (physical B) cancels, matching the player's "A confirms, B backs out" expectation.
+// Keyboard and mouse keep the PC action-game layout for BOTW: WASD move (C held: walk),
+// the mouse turns the camera (I / J / K / L too, runtime/hle/input.c), Space = X (jump),
+// Left Shift = B (sprint, back), E = A (interact, confirm), left click = Y (attack),
+// right click = ZL (shield, lock on), F = ZR (bow), Q = L (rune), R = R (throw),
+// Left Ctrl = left stick press (crouch), middle click = right stick press (look),
+// Tab = Plus (inventory), M = Minus (map), 1 / 2 / 3 / 4 = d-pad right / left / up / down
+// (weapons, shields, runes, whistle: the quick menus), T held = the mouse tilts the
+// controller (motion puzzles, runtime/hle/motion.c). Esc and F1 stay the overlay
+// menu's (runtime/ui/menu.mm).
 #define DEF_PAD { \
     SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_WEST, \
     SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, \
