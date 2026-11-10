@@ -11,6 +11,19 @@ static void deck_paint(uint8_t *lin, uint32_t row, uint32_t w, uint32_t h, Shape
         p[1]=(uint8_t)lroundf(combined*255);
     }
 }
+// Soft drop shadow: the body's silhouette pushed down and faded with distance.
+static void deck_shadow(uint8_t *lin, uint32_t row, uint32_t w, uint32_t h,
+                        const Shape *body, float oy, float fade) {
+    for (uint32_t y=0;y<h;y++) for (uint32_t x=0;x<w;x++) {
+        float d=sd(body,x+.5f,y+.5f-oy);
+        float a=d<0?0:cover(d*fade);
+        if (!a) continue;
+        uint8_t *p=lin+(uint64_t)y*row+x*2;
+        float old=p[1]/255.0f, combined=a*0.42f+old*(1-a*0.42f);
+        p[0]=(uint8_t)lroundf((4*a*0.42f+p[0]*old*(1-a*0.42f))/combined);
+        p[1]=(uint8_t)lroundf(combined*255);
+    }
+}
 static void deck_word(uint8_t *lin,uint32_t row,uint32_t w,uint32_t h,
                       int cx,int cy,const char *label,float cap,float max_w) {
     Canvas c; text(&c,label,CELL/2.0f,CELL/2.0f,cap,max_w);
@@ -18,7 +31,7 @@ static void deck_word(uint8_t *lin,uint32_t row,uint32_t w,uint32_t h,
         int X=cx+x-CELL/2,Y=cy+y-CELL/2;
         if(X<0||Y<0||X>=(int)w||Y>=(int)h) continue;
         float a=c.a[y*CELL+x]; uint8_t *p=lin+(uint64_t)Y*row+X*2;
-        p[0]=(uint8_t)lroundf(p[0]*(1-a)+215*a);
+        p[0]=(uint8_t)lroundf(p[0]*(1-a)+246*a);
     }
 }
 static void deck_draw(uint8_t *lin,uint32_t row,uint32_t w,uint32_t h) {
@@ -26,45 +39,52 @@ static void deck_draw(uint8_t *lin,uint32_t row,uint32_t w,uint32_t h) {
     #define DP(shape,grey) deck_paint(lin,row,w,h,(shape),(grey))
     #define DW(x,y,s,cap,mw) deck_word(lin,row,w,h,x,y,s,cap,mw)
     if(h==288) {
-        DP(box(288,144,275,103,32),32);
-        DP(box(52,155,40,111,31),38); DP(box(524,155,40,111,31),38);
-        DP(ring(box(288,144,275,103,32),1.1f),116);
-        DP(box(288,143,151,101,9),10); DP(ring(box(288,143,151,101,9),1),92);
-        DP(box(288,143,140,88,2),19);
+        Shape body_shape=box(288,144,275,103,32);
+        deck_shadow(lin,row,w,h,&body_shape,3.0f,0.28f);
+        DP(body_shape,52);
+        DP(box(52,155,40,111,31),60); DP(box(524,155,40,111,31),60);
+        DP(box(288,96,275,34,30),60);  // lit top surface
+        DP(ring(box(288,144,275,103,32),1.2f),158);
+        DP(box(288,143,151,101,9),36); DP(ring(box(288,143,151,101,9),1),150);
+        DP(box(288,143,140,88,2),15);
         DW(267,144,"STEAM",10,42); DW(312,144,"DECK",10,36);
         for(int side=0;side<2;side++) {
             int x=side?470:88;
-            DP(circle(x,88,17),8); DP(ring(circle(x,88,17),1.5f),142);
-            DP(circle(x,88,12),52); DP(ring(circle(x,88,11),.7f),89);
+            DP(circle(x,88,17),24); DP(ring(circle(x,88,17),1.5f),185);
+            DP(circle(x,88,12),72); DP(ring(circle(x,88,11),.7f),120);
             DW(x,89,side?"R3":"L3",8,19);
             int pad=side?506:70;
-            DP(box(pad,173,28,28,5),13); DP(ring(box(pad,173,28,28,5),1),100);
-            for(int y=222;y<=236;y+=4) DP(seg(pad-15,y,pad+15,y,.8f),100);
+            DP(box(pad,173,28,28,5),30); DP(ring(box(pad,173,28,28,5),1),150);
+            for(int y=222;y<=236;y+=4) DP(seg(pad-15,y,pad+15,y,.8f),140);
         }
-        DP(box(38,65,6,19,2),100); DP(box(38,65,19,6,2),100);
-        DP(box(38,65,4,17,1),9); DP(box(38,65,17,4,1),9);
+        DP(box(38,65,6,19,2),170); DP(box(38,65,19,6,2),170);
+        DP(box(38,65,4,17,1),12); DP(box(38,65,17,4,1),12);
         const int px[4]={517,535,499,517},py[4]={106,89,89,71};
         const char *letters[4]={"A","B","X","Y"};
         for(int i=0;i<4;i++) {
-            DP(circle(px[i],py[i],10),10); DP(ring(circle(px[i],py[i],10),.7f),135);
+            DP(circle(px[i],py[i],10),16); DP(ring(circle(px[i],py[i],10),.7f),185);
             DW(px[i],py[i],letters[i],10,12);
         }
-        DP(box(126,54,10,7,3),13); DP(box(450,54,10,7,3),13);
-        DP(ring(box(124,53,3,2.5f,0),.6f),195); DP(ring(box(128,56,3,2.5f,0),.6f),195);
-        for(int y=51;y<=57;y+=3) DP(seg(445,y,455,y,.6f),195);
-        DP(box(119,231,17,7,5),12); DW(119,231,"STEAM",5,28);
-        DP(box(457,231,14,7,5),12); DW(457,230,"...",8,20);
+        DP(box(126,54,10,7,3),22); DP(box(450,54,10,7,3),22);
+        DP(ring(box(124,53,3,2.5f,0),.6f),215); DP(ring(box(128,56,3,2.5f,0),.6f),215);
+        for(int y=51;y<=57;y+=3) DP(seg(445,y,455,y,.6f),215);
+        DP(box(119,231,17,7,5),22); DW(119,231,"STEAM",5,28);
+        DP(box(457,231,14,7,5),22); DW(457,230,"...",8,20);
     } else {
-        DP(box(288,52,276,25,19),34); DP(ring(box(288,52,276,25,19),1),120);
-        DP(box(46,25,31,17,10),20); DP(ring(box(46,25,31,17,10),1),120);
-        DP(box(529,25,31,17,10),20); DP(ring(box(529,25,31,17,10),1),120);
-        DP(box(46,49,34,10,4),49); DP(box(530,49,34,10,4),49);
+        Shape edge_shape=box(288,52,276,25,19);
+        deck_shadow(lin,row,w,h,&edge_shape,2.2f,0.30f);
+        DP(edge_shape,52);
+        DP(box(288,38,276,10,14),60);  // lit top edge
+        DP(ring(edge_shape,1),158);
+        DP(box(46,25,31,17,10),22); DP(ring(box(46,25,31,17,10),1),158);
+        DP(box(529,25,31,17,10),22); DP(ring(box(529,25,31,17,10),1),158);
+        DP(box(46,49,34,10,4),72); DP(box(530,49,34,10,4),72);
         DW(46,24,"L2",8,42); DW(529,24,"R2",8,42);
         DW(46,49,"L1",8,42); DW(530,49,"R1",8,42);
-        DP(box(135,48,24,5,2),12); DW(124,49,"-",6,10); DW(146,49,"+",6,10);
-        for(int x=225;x<310;x+=6) DP(seg(x,44,x,61,.9f),9);
-        DP(box(373,50,9,4,2),5); DW(373,73,"USB-C",5,26);
-        DP(circle(426,49,5),9); DP(circle(467,49,5),128);
+        DP(box(135,48,24,5,2),22); DW(124,49,"-",6,10); DW(146,49,"+",6,10);
+        for(int x=225;x<310;x+=6) DP(seg(x,44,x,61,.9f),18);
+        DP(box(373,50,9,4,2),15); DW(373,73,"USB-C",5,26);
+        DP(circle(426,49,5),15); DP(circle(467,49,5),158);
     }
     #undef DP
     #undef DW
