@@ -35,10 +35,14 @@ void control_bar_draw(float) {
         if(sidebar.page==0) {
             nd_ui_status(t("Live graphics settings","即时画面设置"));
             nd_ui_label(t("Frame cap","帧率上限"));
-            static const int rates[]={30,40,45,60,90,120,0};
-            const char *names[]={"30","40","45","60","90","120",t("Unlimited","不限帧")};int rate=3;
-            for(int i=0;i<7;i++) if(rates[i]==framepace_configured_limit()) rate=i;
-            if(nd_ui_choice("##frame-cap",&rate,names,7)) {framepace_set_user_limit(rates[rate]);dirty=true;}
+            static const int rates[]={30,40,45,60,90,120,144,0};
+            const char *names[]={"30","40","45","60","90","120",t("144 (experimental)","144（实验）"),t("Unlimited","不限帧")};int rate=3;
+            for(int i=0;i<8;i++) if(rates[i]==framepace_configured_limit()) rate=i;
+            if(nd_ui_choice("##frame-cap",&rate,names,8)) {framepace_set_user_limit(rates[rate]);dirty=true;}
+            nd_ui_label(t("Performance overlay","性能浮层"));
+            {const char *pn[]={t("Off","关闭"),t("FPS","帧率"),t("Full (CPU / memory / GPU)","完整（CPU / 内存 / GPU）")};
+             int po=g_settings.perf_overlay;if(po<0||po>2) po=0;
+             if(nd_ui_choice("##perf-overlay",&po,pn,3)) {g_settings.perf_overlay=po;dirty=true;}}
             nd_ui_label(t("Anti-aliasing","抗锯齿"));
             const char *aa[]={t("Off","关闭"),"SMAA","TAA"};
             dirty|=nd_ui_choice("##antialias",&g_settings.antialias,aa,3);
