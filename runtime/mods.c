@@ -1,6 +1,10 @@
 // Mods (runtime/mods.h). The player's own content for this game copy, in <data root>/mods.
 #include "mods.h"
 
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>

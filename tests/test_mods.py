@@ -26,6 +26,10 @@ def ips_bytes(data, offset=0x70):
 
 
 C_MAIN = r'''
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+
 #include "mods.h"
 #include <assert.h>
 #include <stdio.h>
