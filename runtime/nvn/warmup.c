@@ -46,11 +46,13 @@ static void *worker(void *arg) {
     uint64_t gen = atomic_load(&sw_renderer_generation);  // (a reboot in the middle: its caches are not ours)
     char romfs[1100];
     snprintf(romfs, sizeof romfs, "%s/romfs", g_romfs_dir ? g_romfs_dir : "");
-    if (atomic_load(&sw_renderer_generation) != gen) { if (g_run_gen.load() == gen) g_running = false; return 0; }
+    if (atomic_load(&sw_renderer_generation) != gen) { if (atomic_load(&g_run_gen) == gen) g_running = false; return 0; }
     maxwell_gmem_base = HEAP_BASE;   // (as the game translates: global memory relative to the guest heap)
     maxwell_gmem_size = HEAP_MAX;
     bool ok = shader_precompile_run(&g_pc, romfs);
-    if (atomic_load(&sw_renderer_generation) != gen) return 0;
+    if (atomic_load(&sw_renderer_generation) != gen) { if (atomic_load(&g_run_gen) == gen) g_running = false; return 0; }  // (a reboot mid-run: drop its flag so the next boot can start again)
+    if (atomic_load(&g_run_gen) == gen) g_running = false;  // (cleared in every path, before the share below: the share
+    // is the signal that this run is over, and frame() keys its next start on the flag being down)
     if (atomic_load(&g_pc.state) == SP_CANCELLED) {
         g_share = -1;
         LOG("[warmup] stopped (what is done stays in the caches)\n");
@@ -62,7 +64,6 @@ static void *worker(void *arg) {
         LOG("[warmup] done in %.0f s: %d shaders, %d translations (%d made, %d cached, %d failed)\n", g_pc.seconds,
             g_pc.shaders, g_pc.keys, g_pc.made, g_pc.cached, g_pc.failed);
     }
-    if (g_run_gen.load() == gen) g_running = false;
     return NULL;
 }
 
@@ -71,10 +72,10 @@ static void *worker(void *arg) {
 void sw_warmup_frame(void) {
     static int forced = -2;
     if (forced == -2) forced = getenv("SAVAGEWIND_SHADER_WARMUP") ? atoi(getenv("SAVAGEWIND_SHADER_WARMUP")) : -1;
-    if (forced == 0 || g_running.load()) return;
+    if (forced == 0 || atomic_load(&g_running)) return;
     uint64_t gen = atomic_load(&sw_renderer_generation);
-    if (g_boot_gen.load() != gen) { g_boot_gen = gen; g_started = false; }
-    if (g_started.load()) return;
+    if (atomic_load(&g_boot_gen) != gen) { g_boot_gen = gen; g_started = false; }
+    if (atomic_load(&g_started)) return;
     g_started = true;
     if (shader_precompile_status(NULL, NULL, 0) == 1) return;
     atomic_store(&g_pc.cancel, false);
@@ -97,17 +98,17 @@ void sw_warmup_frame(void) {
 bool sw_warmup_wait_needed(void) {
     static int forced = -2;
     if (forced == -2) forced = getenv("SAVAGEWIND_SHADER_WARMUP") ? atoi(getenv("SAVAGEWIND_SHADER_WARMUP")) : -1;
-    return forced == 2 && g_running.load();
+    return forced == 2 && atomic_load(&g_running);
 }
 
 bool sw_warmup_wait(int ms, float *done) {
     *done = shader_precompile_progress(&g_pc) * 1000;
     if (*done < 1) SDL_Delay(ms);
-    return g_running.load();
+    return atomic_load(&g_running);
 }
 
 void sw_warmup_cancel(void) {
-    if (g_running.load()) {
+    if (atomic_load(&g_running)) {
         g_cancel = true;
         atomic_store(&g_pc.cancel, true);
         LOG("[warmup] stopped from the control bar\n");
