@@ -45,6 +45,7 @@ extern "C" {
 #include "platform.h"
 #include "paths.h"
 #include "gamebuild.h"
+#include "mods.h"
 #include "gamelib.h"
 #include "game_versions.h"
 #include "romfs_build.h"
@@ -400,11 +401,27 @@ static bool build_game_code(void) {
     char why[256] = "";
     g_build_frac = 0;
     bool ok = gamebuild_run(g_root.c_str(), &o, why, sizeof why);
-    if (!ok) {
+    if (ok)
+        mods_mark_built("extracted");  // (the game code now matches the mods, as they stand)
+    else {
         fprintf(stderr, "[launcher] game code: %s\n", why);
         set_failure(FAIL_BUILD);
     }
     return ok;
+}
+
+// The mods' .ips on the copied exefs (runtime/mods.c): after the copy, before the game code is built
+static bool mods_apply_exefs(void) {
+    if (!mods_present()) return true;
+    char why[512] = "", rec[1024] = "";
+    int n = mods_exefs_apply("extracted", why, sizeof why, rec, sizeof rec);
+    if (why[0]) {
+        set_job(tr("The game's mods couldn't all be applied"), true, why);
+        set_failure(FAIL_BUILD);
+        return false;
+    }
+    (void)n, (void)rec;
+    return true;
 }
 
 // ------------------------------------------------------------------ shader precompilation (runtime/nvn/precompile.h)
@@ -543,6 +560,7 @@ static void *extract_thread(void *) {
     bool dlc_only = false;  // (the shaders precompiled are the game's: nothing new to precompile)
     if (src.empty() && check_copied_files(g_root).empty()) {  // copied already (an update needs new game code)
         g_copy_skipped = true;
+        if (!mods_apply_exefs()) goto done;
         if (!build_game_code()) goto done;
         goto check;
     }
@@ -595,6 +613,7 @@ static void *extract_thread(void *) {
             set_failure(FAIL_COPY);
             goto done;
         }
+        if (!mods_apply_exefs()) goto done;
         if (!dlc.empty()) {
             set_job("Setting up the downloadable content...");
             if (!setup_dlc(dlc)) { set_failure(FAIL_COPY); goto done; }
@@ -1456,6 +1475,32 @@ extern "C" void launcher_run(const char *root, int mode) {
                             remove_dlc(g_root);
                             set_job("Downloadable content removed.");
                             files_gb = -1;
+                        }
+                    }
+                    {   // the player's own mods (runtime/mods.c): the folders in <data root>/mods, in name order,
+                        // and whether the game code is built with them as they stand
+                        ModsInfo mrows[64];
+                        int nm = mods_list(mrows, 64);
+                        if (nm || mods_present()) {
+                            opt_section("Mods");
+                            bool rebuild = mods_need_rebuild("extracted");
+                            for (int i = 0; i < nm && i < 64; i++) {
+                                opt_disable_next();
+                                char label[280];
+                                snprintf(label, sizeof label, "%s%s", mrows[i].name, rebuild ? "  *" : "");
+                                if (opt_action(label, mrows[i].detail, tr("The mods in the data folder's mods, one folder "
+                                    "each, in name order (later ones override earlier ones). * : the game code wasn't built "
+                                    "with the mods as they stand: set the game files up again (the game files folder need "
+                                    "not be chosen) to rebuild it with them. Their RomFS files replace the game's, and their "
+                                    ".ips patches the game's modules the way Atmosphere does."), true)) {
+                                }
+                            }
+                            if (nm == 0) {
+                                opt_disable_next();
+                                opt_action("mods", tr("The folder is there but empty"), tr("Put a mod's files in a folder of "
+                                           "their own in the data folder's mods. RomFS files replace the game's; a .ips "
+                                           "patches the game's modules."), true);
+                            }
                         }
                     }
 #ifndef __APPLE__

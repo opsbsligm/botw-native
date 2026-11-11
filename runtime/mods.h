@@ -1,0 +1,62 @@
+// Mods: the player's own content for this game copy, in <data root>/mods - one folder per mod, applied in name
+// order (later mods override earlier ones).
+//
+// Two kinds, both optional - a missing or empty mods/ folder changes nothing:
+//
+//   RomFS mods - files laid out like the RomFS (e.g. Textures/.../x.bflt). They replace the same-named game files
+//                or add new ones into existing directories, exactly the way the development overlay
+//                (SAVAGEWIND_ROMFS_OVERLAY, runtime/services/fs.c) already does: the mods are merged into one view
+//                (<extracted>/.mods-view) and that view is what the overlay reads, so fs.c itself is unchanged.
+//
+//   ExeFS patches - a mod's <module>.ips files patch the game's NSO modules the way Atmosphere patches a loaded
+//                file: the offset is from the start of the module file, a zero source byte keeps the file's byte
+//                (the IPS 0xF0 run). Applied in the game's copied exefs after the copy and before the game code is
+//                built, so the build lifts the new bytes and the build-id check still matches.
+//
+// Because a patch can change code, with a non-empty mods/ the start screen always offers to rebuild the game code
+// (mods_need_rebuild), and a successful rebuild marks the mods applied (mods_mark_built) - so a plain start
+// afterwards goes straight into the game. Deleting a mod and re-running Set up restores the original module (the
+// copy is re-made).
+//
+// mods.c is C; called from the start screen (runtime/ui/launcher.mm) and the boot (runtime/main.c).
+#pragma once
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// <data root>/mods, or NULL while the data root isn't up yet.
+const char *mods_dir(void);
+bool mods_present(void);  // the mods/ folder exists and isn't empty
+
+// Merge the RomFS mods into <extracted>/.mods-view and point SAVAGEWIND_ROMFS_OVERLAY at the view; removes both
+// when there is nothing to overlay (a development overlay set by the user alone is left untouched). The extracted
+// root is "extracted" in the data root, as it is for the game files. Returns the number of files merged (0: no
+// RomFS mods). Called at the boot before the game files open, and once more before every set up; idempotent.
+int mods_romfs_apply(void);
+
+// Apply the mods' .ips to <extracted>/exefs (after the exefs copy, before the game code build). For each mod, the
+// records of every <module>.ips in the folder - in name order - are applied to that module; the module's NSO
+// header must still read with the same build-id afterwards. Returns the number of modules left patched; <why>
+// (when non-NULL) a first problem, <record> (when non-NULL) where the applied-patches note went ("" when there is
+// nothing to record).
+int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *record, size_t record_size);
+
+// true while the game code was not built with the current mods (see the top): the start screen keeps offering the
+// rebuild. mods_mark_built clears that after a successful build.
+bool mods_need_rebuild(const char *extracted);
+void mods_mark_built(const char *extracted);
+
+// What the start screen shows: the mod folders and what each one has (how many RomFS files, which modules its
+// patches reached). The rows, terminated by an empty name.
+typedef struct ModsInfo {
+    const char *name;  // the mod folder's name ("" ends the list)
+    const char *detail;  // a sentence about its contents
+} ModsInfo;
+int mods_list(ModsInfo *rows, int cap);
+
+#ifdef __cplusplus
+}
+#endif
