@@ -241,7 +241,7 @@ const char *ups_label(const Item &, int x) {
 const char *fps_label(const Item &, int x) {
     static char buf[32];
     if (!k_fps[x]) return tr("Off");
-    snprintf(buf, sizeof buf, tr("%d FPS"), k_fps[x]);
+    snprintf(buf, sizeof buf, k_fps[x] == 144 ? tr("%d FPS (experimental, high-refresh output only)") : tr("%d FPS"), k_fps[x]);
     return buf;
 }
 
