@@ -396,7 +396,12 @@ void input_handle_event(const SDL_Event *e) {
         scanned = true;
         int n = 0;
         SDL_JoystickID *ids = SDL_GetGamepads(&n);
-        if (n > 0 && !pad) { pad = SDL_OpenGamepad(ids[0]); LOG("[input] gamepad: %s\n", SDL_GetGamepadName(pad)); note_family(); }
+        if (n > 0 && !pad) {
+            pad = SDL_OpenGamepad(ids[0]);
+            LOG("[input] gamepad: %s\n", SDL_GetGamepadName(pad));
+            note_family();
+            last_device = DEVICE_PAD;  // the first menu's icons follow the pad already in hand, not the keyboard
+        }
         if (pad) motion_pad_opened(pad);
         SDL_free(ids);
     }
@@ -439,6 +444,7 @@ void input_handle_event(const SDL_Event *e) {
             pad = SDL_OpenGamepad(e->gdevice.which);
             LOG("[input] gamepad: %s\n", SDL_GetGamepadName(pad));
             note_family();
+            last_device = DEVICE_PAD;
             if (pad) motion_pad_opened(pad);
         }
         break;
@@ -686,6 +692,7 @@ void input_frame(uint64_t frame) {
     script_ly = ly;
     script_rx = rx;
     script_ry = ry;
+    if (b) last_device = DEVICE_PAD;  // the script drives the controller; its presses are the player's intent
     motion_script(tilt_p, tilt_r, turn_p, turn_y);
 }
 
