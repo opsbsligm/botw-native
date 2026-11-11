@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "gamelib.h"
+#include "mods.h"
 #include "paths.h"
 #include "nvn/maxwell/shader.h"
 #include "nvn/shader_archive.h"
@@ -152,7 +153,17 @@ static void teardown(void) {
     LOG("[reboot] game torn down in %llums (%d reset hooks)\n", (unsigned long long)((plat_now_ns() - t0) / 1000000), n);
 }
 
+// The plain start (no launcher) goes into the game when the files are ready and the game code is the one built
+// with the mods, as they stand (runtime/mods.c)
+bool launcher_game_ready(const char *root);
+static bool plain_start_ready(const char *root) {
+    if (!launcher_game_ready(root)) return false;
+    if (!mods_present()) return true;
+    return !mods_need_rebuild(root);
+}
+
 static void boot(const char *root) {
+    mods_romfs_apply();  // (the player's mods: the overlay view, before the game files open)
     char exefs[1024], romfs[1024], npdm_path[1024];
     snprintf(exefs, sizeof exefs, "%s/exefs", root);
     snprintf(romfs, sizeof romfs, "%s/romfs", root);
@@ -350,7 +361,7 @@ int main(int argc, char **argv) {
 #endif
     // A plain start goes straight into the game once the game files are set up and the game code built from them
     // matches this build; the start screen only when there is something to set up, or when asked for.
-    int mode = config ? LAUNCHER_CONFIG : skip_launcher || launcher_game_ready(root) ? LAUNCHER_NONE : LAUNCHER_SETUP;
+    int mode = config ? LAUNCHER_CONFIG : skip_launcher || plain_start_ready(root) ? LAUNCHER_NONE : LAUNCHER_SETUP;
     // (tests of the start screen - screenshots, setup and delete runs - show it: the configuration screen, or
     // SAVAGEWIND_LAUNCHER_MODE=setup / config)
     const char *test_mode = getenv("SAVAGEWIND_LAUNCHER_MODE");
@@ -362,6 +373,8 @@ int main(int argc, char **argv) {
         boot(root);
         int kind = ui_run();  // window and input on the main thread; returns when a reboot is requested
         teardown();
-        mode = kind == RT_REBOOT_TITLE ? LAUNCHER_CONFIG : LAUNCHER_NONE;
+        // back to the start screen: the configuration, or the set up again when the game code no longer matches
+        // the mods as they stand
+        mode = kind == RT_REBOOT_TITLE ? (plain_start_ready(root) ? LAUNCHER_CONFIG : LAUNCHER_SETUP) : LAUNCHER_NONE;
     }
 }
