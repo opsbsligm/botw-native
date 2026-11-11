@@ -60,6 +60,18 @@ void control_bar_draw(float) {
             dirty|=nd_ui_choice("##quality",&g_settings.upscale_quality,quality,5);ImGui::EndDisabled();
             nd_ui_label(t("Sharpening","锐化强度"));
             ImGui::SliderInt("##sharpness",&g_settings.sharpening,0,10);if(ImGui::IsItemDeactivatedAfterEdit()) dirty=true;
+            nd_ui_label(t("Shadow resolution","太阳阴影精度"));
+            {static const int shadow[]={SHADOW_CONSOLE,SHADOW_HIGH,SHADOW_ULTRA,SHADOW_EXTREME};static const char *snames[]={t("Console (896)","主机（896）"),t("High (2048)","高（2048）"),t("Ultra (4096)","超高（4096）"),t("Extreme (8192)","极致（8192）")};int si=0;
+             for(int i=0;i<4;i++) if(g_settings.shadow_res==shadow[i]) si=i;
+             dirty|=nd_ui_choice("##shadow",&si,snames,4);g_settings.shadow_res=shadow[si];}
+            nd_ui_label(t("Anisotropic filtering","各向异性过滤"));
+            {static const char *anames[]={t("Off (game)","关（游戏自带）"),t("2x","2 倍"),t("4x","4 倍"),t("8x","8 倍"),t("16x","16 倍")};
+             dirty|=nd_ui_choice("##aniso",&g_settings.anisotropy,anames,5);}
+            nd_ui_label(t("Field of view","视野范围"));
+            {static const int fov[]=FOV_CHOICES;static const char *fnames[9];static char fbuf[9][8];
+             for(int i=0;i<9;i++){snprintf(fbuf[i],8,"%d%%",fov[i]);fnames[i]=fbuf[i];}
+             int fi=3;for(int i=0;i<9;i++) if(g_settings.fov==fov[i]) fi=i;
+             dirty|=nd_ui_choice("##fov",&fi,fnames,9);g_settings.fov=fov[fi];}
             ImGui::TextWrapped(t("Backend anti-aliasing: %s\nRender scale: %.2fx","后端抗锯齿：%s\n当前渲染比例：%.2f 倍"),aa[std::clamp(rt_antialias(),0,2)],upscale_factor());
             if(ImGui::TreeNode(t("Window size / capabilities","窗口尺寸与能力说明"))) {
                 nd_ui_label(t("Window size","窗口尺寸"));
