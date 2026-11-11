@@ -20,6 +20,13 @@
 #include "paths.h"
 #include "log.h"
 
+// Every snprintf here joins a bounded dir and a <=255-byte name into a PATH_MAX buffer; when the join would
+// overflow, the caller stats/unlinks the result and treats a short path as "not there". GCC's -Wformat-truncation
+// flags these joins as "may be truncated" under -Werror even though the truncation is always handled; clang does
+// not emit the warning, so scope the suppression to the GCC warning group (unknown to clang, which ignores it).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+
 // ------------------------------------------------------------------ the mod folders
 
 static const char *g_view;  // <extracted>/.mods-view, while the overlay reads it
@@ -624,3 +631,5 @@ int mods_list(ModsInfo *rows, int cap) {
     if (n < cap) rows[n].name = rows[n].detail = "";
     return n;
 }
+
+#pragma GCC diagnostic pop
