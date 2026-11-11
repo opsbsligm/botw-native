@@ -13,6 +13,8 @@ extern "C" {
 #include "../motion.h"
 #include "../framepace.h"
 #include "../nvn/output_scale.h"
+#include "../nvn/precompile.h"
+#include "../nvn/warmup.h"
 void input_reset(void);
 void menu_request_window_size_apply(void);
 }
@@ -34,6 +36,21 @@ void control_bar_draw(float) {
     if(content) {
         if(sidebar.page==0) {
             nd_ui_status(t("Live graphics settings","即时画面设置"));
+            if(sw_warmup_available()) {
+                int st=sw_warmup_state();
+                const char *wst;
+                if(st==SP_READING) wst=t("Reading the game's shader data...","正在读取游戏着色器数据…");
+                else if(st==SP_COMPILING) wst=t("Compiling shaders...","正在编译着色器…");
+                else if(st==SP_PIPELINES) wst=t("Building render pipelines...","正在构建渲染管线…");
+                else if(st==SP_DONE) wst=t("Complete","已完成");
+                else if(st==SP_FAILED) wst=t("Failed","失败");
+                else if(st==SP_CANCELLED) wst=t("Stopped","已停止");
+                else wst=t("Not started","未开始");
+                nd_ui_label(t("Background shader warm-up","背景着色器预热"));
+                nd_ui_status(wst, st==SP_FAILED?-1:(st==SP_DONE?1:0));
+                if(st==SP_READING||st==SP_COMPILING||st==SP_PIPELINES)
+                    if(ImGui::Button(t("Stop","停止"),ImVec2(-1,44))) sw_warmup_cancel();
+            }
             nd_ui_label(t("Frame cap","帧率上限"));
             static const int rates[]={30,40,45,60,90,120,0};
             const char *names[]={"30","40","45","60","90","120",t("Unlimited","不限帧")};int rate=3;

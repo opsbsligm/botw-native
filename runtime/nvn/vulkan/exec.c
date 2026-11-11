@@ -3875,7 +3875,10 @@ static int g_cs_n;  // (compute program table below)
 // In-place reboot (device.c backend_reset; GPU idle): drop what is keyed by guest addresses - programs by code
 // address (the old Prog / Pipe objects are leaked, so pipeline keys holding their pointers can't collide), compute
 // programs, shared copies - and the heap import: its pages are replaced (re-imported on first use).
+_Atomic uint64_t sw_renderer_generation;  // (warmup.c: up at every in-place reboot)
+
 void vk_exec_reset(void) {
+    sw_renderer_generation++;  // (warmup.c: its caches are this renderer's, and the renderer is new)
     oq_counting = false;
     oq_nrun = oq_nreports = 0;  // (pending reports pointed at the old boot's memory)
     ngw = 0;
@@ -4639,6 +4642,11 @@ static void pso_init(void) {
 
 // device.c, once per frame presented: whether this frame waits for the pre-warm (it looks like gameplay and the
 // pre-warm is still going), and the wait itself in steps of ms (true once done; done: the part built).
+bool vk_prewarm(void) {  // (device.c pso_wait: the pre-warm's part of the first gameplay frame)
+    return pso_nrecs && !getenv("SAVAGEWIND_NO_SHADER_WARM") && !getenv("SAVAGEWIND_NO_XLATE_CACHE") &&
+           !maxwell_translation_uncacheable();
+}
+
 bool vk_pso_wait_needed(void) {
     static uint64_t mark;
     uint64_t d = cum_draws - mark;
