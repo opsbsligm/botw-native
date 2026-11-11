@@ -19,6 +19,7 @@
 #include "vk.h"
 #include "../output_scale.h"
 #include "../renderer.h"
+#include "../warmup.h"
 
 #ifdef _WIN32  // (kernel32; windows.h itself clashes with names used here)
 __declspec(dllimport) int __stdcall MoveFileExA(const char *from, const char *to, unsigned long flags);
@@ -1553,6 +1554,7 @@ void backend_represent(void) {
 // third of the width near the bottom; clears only, nothing to compile).
 bool vk_pso_wait_needed(void);
 bool vk_pso_wait(int ms, float *done);
+bool vk_prewarm(void);  // (exec.c pso_init: whether the boot's pipeline pre-warm is on)
 
 static void present_progress(float done) {
     static const float black[4] = {0, 0, 0, 1};
@@ -1578,10 +1580,12 @@ static void present_progress(float done) {
 }
 
 static uint64_t pso_wait(void) {  // ns waited
-    if (!vk_pso_wait_needed()) return 0;
+    if (!vk_prewarm() && !sw_warmup_wait_needed()) return 0;
     uint64_t t0 = SDL_GetTicksNS();
     float done = 0;
     int bars = 0;
+    while (sw_warmup_wait_needed() && !sw_warmup_wait(100, &done))
+        if (SDL_GetTicksNS() - t0 > 300000000ull) { present_progress(done); bars++; }
     while (!vk_pso_wait(100, &done))
         if (SDL_GetTicksNS() - t0 > 300000000ull) { present_progress(done); bars++; }
     uint64_t dt = SDL_GetTicksNS() - t0;
@@ -1618,6 +1622,7 @@ static bool fg_wanted(void) {
 }
 
 static void present_locked(NvnTexture *t) {
+    sw_warmup_frame();  // (in-play shader warm-up: the boot's first frame starts it)
     g_last_presented = t;
     TexBackend *b = vk_tex(t, true);
     b->presented = true;
