@@ -56,6 +56,7 @@ typedef struct {
     int ngrown;
     uint8_t *rstb_blob;      // the patched ResourceSizeTable served from memory (rstb_patch)
     uint8_t *hud_pack;       // Pack/Bootup.pack with the HUD letters patched (hud_letters_patch)
+    int hud_ov_index;         // its overlay entry (-1: the letters patch did not apply)
     uint8_t *voice_banks;    // the text language's voice banks with the chosen voices' lengths (bars_hybrid)
 } RomImage;
 #define AOC_MAX 8
@@ -73,6 +74,7 @@ RT_ON_RESET(fs_reset) {
         for (int i = 0; i < m->npatches; i++) free(m->patches[i].data);  // (ov_meta and the extended table are among these)
         for (int i = 0; i < m->rom_nfiles; i++) free(m->rom_files[i].path);
         free(m->ov), free(m->rom_files), free(m->grown), free(m->rstb_blob), free(m->hud_pack), free(m->voice_banks);
+        m->hud_ov_index = -1;
         romfs_image_close(m->img);
         *m = (RomImage){0};
     }
@@ -681,12 +683,195 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
     memcpy(R->ov_meta + R->rom_files[k].meta + 8, &rel, 8);
     memcpy(R->ov_meta + R->rom_files[k].meta + 0x10, &size, 8);
     if (R->ov_n == R->ov_cap) { R->ov_cap = R->ov_cap ? R->ov_cap * 2 : 256; R->ov = realloc(R->ov, sizeof *R->ov * R->ov_cap); }
-    R->ov[R->ov_n++] = (Overlay){R->ov_end, size, NULL, -1, R->hud_pack};
+    R->ov[R->ov_n] = (Overlay){R->ov_end, size, NULL, -1, R->hud_pack};
+    R->hud_ov_index = R->ov_n;
+    R->ov_n++;
     R->ov_end = (R->ov_end + size + 0xF) & ~0xFull;
     R->grown = realloc(R->grown, sizeof *R->grown * (R->ngrown + 1));
     R->grown[R->ngrown++] = (GrownFile){"Layout/Common.blarc", nn - an};
     LOG("[fs] HUD letters: %d button letters use the icon font (archive %zu -> %zu bytes, pack +%llu KB, %.0f ms)\n",
         panes, (size_t)old, zn, (unsigned long long)(delta >> 10), (plat_now_ns() - t0) / 1e6);
+}
+// The quick menu (weapons / shields / materials / abilities) captures the game picture when its capture pane
+// becomes visible. The pane's FLVI visibility step animates from frame 0 (hidden) to frame 1 (visible); the
+// animation advances by the game's frame ratio, so above 30 fps (framepace: 0.5 at 60) frame 1 comes two or three
+// frames after the world stopped drawing and the menu's background is black. The pane N_DmcCapture_00 in
+// anim/MainShortCut_00_HoldShortCut.bflan (Layout/Common.sblarc in Pack/Bootup.pack) steps 0.0 -> 1.0 on 1.6.0
+// (2026-11-11, read from the Deck release's pack); the same shape was fixed in that position by the TOTK quick-menu
+// fix (sigma / MacNativeGames, the C_CaptureBG_00 panes there). The step's second key's value becomes 0.0: the pane
+// is visible from the first frame. The archive and the pack are recompressed where they were, so no file's
+// alignment changes. The game-over menu is not affected: BOTW's death screen is TipsGameOver.bfevfl (Bootup.pack),
+// a text flow with no frame-wait event chain (TOTK's DmF_SY_GameOver.bfevfl wait does not exist here).
+// SAVAGEWIND_NO_QUICKMENU_FIX=1: the game's pane.
+// BFLAN layout (1.6.0, little-endian): the section count is the u16 at 0x10 and the sections start at 0x14; a pane's
+// track offsets are relative to the pane entry, a track's group offsets relative to its FLVI section, and a step key
+// is a float value and a 16-bit frame (4-byte entries).
+// TEST(bflan_step_flvi:begin)
+static int bflan_step_flvi(const uint8_t *b, size_t n, const char *pane, size_t *value_off) {
+    if (n < 0x14 || memcmp(b, "FLAN", 4) || b[4] != 0xFF || b[5] != 0xFE) return -1;
+    uint16_t sec;
+    memcpy(&sec, b + 0x10, 2);
+    size_t at = 0x14;
+    for (unsigned s = 0; s < sec && at + 8 <= n; s++) {
+        uint32_t sz;
+        memcpy(&sz, b + at + 4, 4);
+        if (sz < 8 || at + sz > n) return -1;
+        if (!memcmp(b + at, "pai1", 4) && sz >= 0x28) {
+            uint16_t ents;
+            uint32_t tbl;
+            memcpy(&ents, b + at + 14, 2);
+            memcpy(&tbl, b + at + 16, 4);
+            if (tbl < 0x14 || tbl >= sz) return -1;
+            size_t p_at = at;
+            for (unsigned e = 0; e < ents; e++) {
+                uint32_t eo;
+                memcpy(&eo, b + at + tbl + e * 4, 4);
+                if (eo < 0x14 || p_at + eo + 0x28 > n) continue;  // (the entry must clear the section header; name+bounds below do the real filtering)
+                size_t p = p_at + eo;
+                if (p + 28 > n || strcmp((const char *)b + p, pane)) continue;
+                uint8_t ntr = b[p + 28];
+                for (unsigned t = 0; t < ntr; t++) {
+                    if (p + 32 + t * 4 + 4 > n) return -1;
+                    uint32_t to;
+                    memcpy(&to, b + p + 32 + t * 4, 4);
+                    if (to < 0x10 || p + to + 12 > n) continue;
+                    size_t f = p + to;
+                    if (memcmp(b + f, "FLVI", 4)) continue;
+                    uint32_t gr;
+                    memcpy(&gr, b + f + 4, 4);
+                    if (gr > 4096 || f + 8 + (size_t)gr * 4 > n) return -1;
+                    for (unsigned g = 0; g < gr; g++) {
+                        uint32_t gco;
+                        memcpy(&gco, b + f + 8 + g * 4, 4);
+                        if (f + gco + 12 > n) continue;
+                        size_t gv = f + gco;
+                        if (b[gv + 2] != 1) continue;  // (a step curve)
+                        uint16_t keys;
+                        uint32_t ko;
+                        memcpy(&keys, b + gv + 4, 2);
+                        memcpy(&ko, b + gv + 8, 4);
+                        if (keys < 2 || gv + ko + (size_t)keys * 8 > n) continue;
+                        uint16_t t1;
+                        memcpy(&t1, b + gv + ko + 8 + 4, 2);
+                        if (t1 != 1) continue;  // (the step: its second key at frame 1)
+                        *value_off = gv + ko + 8;
+                        return 0;
+                    }
+                }
+            }
+        }
+        at += sz;
+    }
+    return -1;
+}
+// TEST(bflan_step_flvi:end)
+
+static void quickmenu_capture_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
+    static const char pack_path[] = "Pack/Bootup.pack";
+    static const char lane[] = "anim/MainShortCut_00_HoldShortCut.bflan";
+    if (getenv("SAVAGEWIND_NO_QUICKMENU_FIX")) return;
+    int k = 0;
+    while (k < R->rom_nfiles && strcmp(R->rom_files[k].path, pack_path)) k++;
+    char host[1200];
+    if (k == R->rom_nfiles || overlay_file(pack_path, host, sizeof host)) return;
+    uint64_t t0 = plat_now_ns();
+    // The HUD letters patch (hud_letters_patch) has rewritten the same pack when it applies: start from there,
+    // else from the game's file.
+    size_t pn;
+    uint8_t *pack;
+    if (R->hud_pack && R->hud_ov_index >= 0) {
+        pn = R->ov[R->hud_ov_index].size;
+        pack = malloc(pn);
+        memcpy(pack, R->hud_pack, pn);
+    } else {
+        pn = R->rom_files[k].size;
+        pack = malloc(pn);
+        if (romfs_image_pread(R->img, pack, pn, R->rom_files[k].off) != (ssize_t)pn) { free(pack); return; }
+    }
+    size_t zn = 0, an = 0;
+    uint8_t *arc = NULL, *arc2 = NULL, *z2 = NULL;
+    uint32_t pdoff, ps, pe, adoff, as, ae;
+    if (sarc_find(pack, pn, "Layout/Common.sblarc", &pdoff, &ps, &pe) < 0) { free(pack); return; }
+    arc = yaz0_unpack(pack + pdoff + ps, pe - ps, &an);
+    const char *why = !arc ? "archive not readable" : NULL;
+    int li = -1;
+    if (!why) {
+        li = sarc_find(arc, an, lane, &adoff, &as, &ae);
+        if (li < 0 || (uint32_t)(ae - as) > an) why = "lane not found";
+        else {
+            size_t val;
+            float v0;
+            if (bflan_step_flvi(arc + adoff + as, ae - as, "N_DmcCapture_00", &val) < 0) why = "no step FLVI track";
+            else {
+                memcpy(&v0, arc + adoff + as + val - 8, 4);
+                if (v0 != 0.0f) why = "step keys not 0.0 -> 1.0";
+                else {
+                    arc2 = malloc(an);
+                    memcpy(arc2, arc, an);
+                    float zero = 0.0f;
+                    memcpy(arc2 + adoff + as + val, &zero, 4);
+                }
+            }
+        }
+    }
+    if (why) {
+        LOG("[fs] quick menu: %s, the game's capture pane stays\n", why);
+        free(pack), free(arc), free(arc2);
+        return;
+    }
+    // The archive is the same size (4 bytes in place); recompressed where it was, what follows moves by a multiple
+    // of 0x2000 when the encoding grew, so every file keeps its alignment.
+    z2 = yaz0_pack(arc2, an, pack + pdoff + ps, &zn);
+    uint64_t old = pe - ps, delta = zn > old ? (zn - old + 0x1FFF) & ~0x1FFFull : 0;
+    size_t qn = pn + delta;
+    uint8_t *q = calloc(1, qn);
+    memcpy(q, pack, pdoff + ps);
+    memcpy(q + pdoff + ps, z2, zn);
+    memcpy(q + pdoff + pe + delta, pack + pdoff + pe, pn - pdoff - pe);
+    uint32_t cnt = pack[0x1A] | pack[0x1B] << 8, ne = (uint32_t)(ps + zn), q32 = (uint32_t)qn;
+    for (uint32_t i = 0; i < cnt; i++) {
+        uint32_t s2, e2;
+        memcpy(&s2, q + 0x20 + i * 16 + 8, 4);
+        memcpy(&e2, q + 0x20 + i * 16 + 12, 4);
+        if (i == (uint32_t)li) continue;  // (the lane: its slot is unchanged)
+        if (i == (uint32_t)sarc_find(pack, pn, "Layout/Common.sblarc", &pdoff, &ps, &pe)) {
+            memcpy(q + 0x20 + i * 16 + 12, &ne, 4);
+            continue;
+        }
+        if (s2 >= pe) s2 += (uint32_t)delta, e2 += (uint32_t)delta;
+        memcpy(q + 0x20 + i * 16 + 8, &s2, 4);
+        memcpy(q + 0x20 + i * 16 + 12, &e2, 4);
+    }
+    memcpy(q + 8, &q32, 4);
+    free(pack), free(arc), free(arc2), free(z2);
+    if (delta && R->hud_pack && R->hud_ov_index >= 0) {
+        // The HUD letters' pack grew: the overlays after it are already placed, so the new pack goes to the end of
+        // the appended region and the file's meta points there.
+        meta_copy(fmeta, foff, fsz);
+        uint64_t rel = R->ov_end - R->rom_data_off, size = qn;
+        memcpy(R->ov_meta + R->rom_files[k].meta + 8, &rel, 8);
+        memcpy(R->ov_meta + R->rom_files[k].meta + 0x10, &size, 8);
+        if (R->ov_n == R->ov_cap) { R->ov_cap = R->ov_cap ? R->ov_cap * 2 : 256; R->ov = realloc(R->ov, sizeof *R->ov * R->ov_cap); }
+        R->ov[R->ov_n++] = (Overlay){R->ov_end, size, NULL, -1, q};
+        R->ov[R->hud_ov_index].mem = NULL;  // (replaced)
+        R->ov_end = (R->ov_end + size + 0xF) & ~0xFull;
+    } else if (R->hud_pack && R->hud_ov_index >= 0) {
+        free(R->hud_pack);
+        R->hud_pack = q;
+        R->ov[R->hud_ov_index].size = qn;
+    } else {
+        meta_copy(fmeta, foff, fsz);
+        uint64_t rel = R->ov_end - R->rom_data_off, size = qn;
+        memcpy(R->ov_meta + R->rom_files[k].meta + 8, &rel, 8);
+        memcpy(R->ov_meta + R->rom_files[k].meta + 0x10, &size, 8);
+        if (R->ov_n == R->ov_cap) { R->ov_cap = R->ov_cap ? R->ov_cap * 2 : 256; R->ov = realloc(R->ov, sizeof *R->ov * R->ov_cap); }
+        R->ov[R->ov_n++] = (Overlay){R->ov_end, size, NULL, -1, q};
+        R->ov_end = (R->ov_end + size + 0xF) & ~0xFull;
+        R->grown = realloc(R->grown, sizeof *R->grown * (R->ngrown + 1));
+        R->grown[R->ngrown++] = (GrownFile){"Layout/Common.blarc", 0};
+    }
+    LOG("[fs] quick menu: the capture pane is visible from frame 0 (pack %zu -> %zu bytes, %.0f ms)\n",
+        pn, qn, (plat_now_ns() - t0) / 1e6);
 }
 
 // An RSTB entry: names first (paths whose crc32 collides), then the crc32 table (sorted). NULL when it has none.
@@ -882,6 +1067,7 @@ static void rom_index(void) {
         break;
     }
     hud_letters_patch(fmeta, foff, fsz);
+    quickmenu_capture_patch(fmeta, foff, fsz);
     rstb_patch(fmeta, foff, fsz);
     if (R->ov_n) LOG("[fs] overlay: %d romfs files replaced\n", R->ov_n);
     if (R->ov_meta) { R->patches[R->npatches++] = (Patch){R->ov_meta_off, R->ov_meta_size, R->ov_meta}; }
