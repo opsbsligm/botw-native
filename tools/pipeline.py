@@ -53,11 +53,12 @@ def runtime(work, jobs):
     make(work, 'runtime', jobs, str(work / 'game/savagewind'))
 
 
-def code(work, dump, jobs):
+def code(work, dump, jobs, mods=None):
     from legacy_sdk7 import verify_exefs
     verify_exefs(dump / 'exefs', ['main', 'subsdk0', 'sdk'])
     tool(work, 'generate', 'gen.py', 'all', dump / 'exefs', work / 'generated',
-         '--hle', ROOT / 'runtime/hle/hle_symbols.txt', '--simd', 'c', '--legacy-sdk7')
+         '--hle', ROOT / 'runtime/hle/hle_symbols.txt', '--simd', 'c', '--legacy-sdk7',
+         *(['--code-mods', mods] if mods is not None else []))
     make(work, 'game', jobs)
 
 
@@ -86,6 +87,7 @@ def main():
     p.add_argument('--work', type=Path, required=True)
     p.add_argument('--jobs', type=int, choices=(1, 2, 3, 4), default=2)
     p.add_argument('--stage', choices=('code', 'assets', 'package', 'all'), default='all')
+    p.add_argument('--code-mods', type=Path)
     a = p.parse_args()
     a.work = a.work.resolve()
     a.work.mkdir(parents=True, exist_ok=True)
@@ -103,14 +105,15 @@ def main():
     receipt.unlink(missing_ok=True)
     if a.stage in ('code', 'all'):
         (a.work / 'code-receipt.json').unlink(missing_ok=True)
-        code(a.work, dump, a.jobs)
+        code(a.work, dump, a.jobs, a.code_mods)
         publish(a.work, 'code', [a.work / 'game', a.work / 'generated'], before)
     if a.stage in ('assets', 'all'):
         (a.work / 'assets-receipt.json').unlink(missing_ok=True)
         assets(a.work, dump, a.jobs)
         publish(a.work, 'assets', [a.work / 'validated-assets'], before)
     if a.stage in ('package', 'all'):
-        tool(a.work, 'package', 'package_linux.py', '--work', a.work, '--dump', dump)
+        tool(a.work, 'package', 'package_linux.py', '--work', a.work, '--dump', dump,
+             *(['--code-mods', a.code_mods] if a.code_mods is not None else []))
         receipt.write_text(json.dumps(dict(schema=1, game=GAME, package='package',
             hardware_validated=False), indent=2) + '\n')
     print(a.command + ' / ' + a.stage + ' completed', flush=True)

@@ -1,49 +1,34 @@
-# CA4 mods 系统设计定稿（旷野之息）
+# CA4：静态 Mod 构建与 HD 贴图边界
 
-更新：2026-11-12。本文把 CA4 从"吸收方案"收敛为**实现定稿**：已落地部分给出代码锚点与验收口径，未闭合的 HD 贴图堆扩容给出唯一推荐方案与边界，避免后续反复选型。
+更新：2026-11-13。本文替代此前将告警阈值视作堆扩容的设计。整体 `hardware_validated=false`。
 
-## 范围
+## 当前实现
 
-CA4 三块能力，全部以「玩家数据目录 `mods/`，缺省即无副作用」为原则：
+- RomFS 覆盖与旧 setup 补丁接口保留在 `runtime/mods.c`；便携包和真实资源覆盖仍需单独实机验收。
+- Linux 私有构建新增 `--code-mods`，在 AOT 生成之前处理 `mods/<名称>/exefs/` 中的标准 IPS、IPS32 和 PCHTXT。原始 main/subsdk0/sdk 先核对受管 SDK7 SHA-256，再解压、验证段摘要及补丁。
+- 代码生成直接使用补丁后的内存快照，不重新打开活动输入；输出准备目录一次原子发布。生成记录和准备的全部 NSO 纳入 code 阶段逐文件回执。
+- 打包重新读取并验证原始模块、活动补丁和准备输出，与生成记录逐字段及逐字节比较。运行包使用相同的补丁后 NSO，确保 rodata/data 变化也能进入运行时；输入变化必须重新生成、编译。
+- 保护 MOD0、dynamic、符号与字符串表、重定位表及目标、异常展开记录、宿主 HLE 函数和 SDK7 时钟替换位置。冲突明确失败，不能把会被宿主替换的指令修改记成生效。
+- 原始输入只读；保留原始版本门禁，不增加跳过指纹或接受任意版本的选项。完整操作与边界见 [mods.md](mods.md)。
 
-1. **RomFS 覆盖 mod**（贴图、文本、模型等）
-2. **ExeFS 代码补丁 mod**（`.ips`，Atmosphère 同款格式）
-3. **HD 贴图包**（依赖 1 + 3 的贴图堆扩容）
+## 验证范围
 
-## 已落地（main 代码锚点）
+原创三模块夹具已通过生产准备与生成器、Clang 编译，并执行修改后的函数确认返回 42。目录 FD、软链接、FIFO、版本/段边界、保留区、晚失败原子性，以及打包拒绝输入/输出篡改均有回归。
 
-| 能力 | 实现 | 锚点 |
-|------|------|------|
-| RomFS 覆盖 | `mods/<mod>/` 按目录名序合并进 `<extracted>/.mods-view`，指向 `SAVAGEWIND_ROMFS_OVERLAY`，与开发 overlay 同一条路（`runtime/services/fs.c` 零改动） | `runtime/mods.c` `mods_romfs_apply` |
-| ExeFS 补丁 | 每个 `<module>.ips`（偏移自模块文件头，IPS 0xF0 表示保留原字节）应用到 `<extracted>/exefs/<module>`，NSO build-id（0x40 处）必须保持可读且不变；补丁发生在 exefs 拷贝之后、游戏代码构建之前，构建即吸收新字节，build-id 校验仍通过 | `runtime/mods.c` `mods_exefs_apply`、`nso_build_id` |
-| 重建触发 | mods 非空时，启动画面以「mods 文件集 + exefs 代码段」为指纹提示重建游戏代码（`mods_need_rebuild`），重建成功后 `mods_mark_built` 置位，之后普通启动直接进游戏；删掉 mod 再 Set up 恢复原模块 | `runtime/mods.c` `mods_fingerprint`、`runtime/ui/launcher.mm` |
-| 启动画面清单 | `mods_list` 返回每个 mod 的目录名与内容概述（RomFS 文件数 / 触及哪些模块），末行空名结束 | `runtime/mods.h` `ModsInfo` |
-| 测试 | `tests/test_mods.py`（合并序、overlay 读回、ips 打补丁与 build-id、重建触发往返） | CI native-unit |
+实际私有 SDK7 三模块已经只读验证：原始指纹通过，解压映像与旧加载器一致，无补丁时保留原始压缩字节；加载元数据保留区能从真实模块生成。以上不等于实际社区代码 Mod 已在整游戏中生效。
 
-**验收口径（保持 97 项矩阵之外的 CA 独立口径）：** 挂一个 RomFS mod（改一张贴图）确认生效截图；挂一个 `.ips` 确认重编译 + 生效 + build-id 未破坏；配置/菜单读回。`hardware_validated` 以 Deck 实跑为准。
+仍须完成当前提交的完整 CI/安全审查、真实代码 Mod 的完整重编译与隔离存档实机回归，然后按门禁部署。
 
-## 未闭合：HD 贴图堆扩容（唯一子项）
+## HD 贴图堆仍未闭合
 
-**真实锚点（origin/main 代码核实）：** BOTW 1.8.2 的纹理是 NVN **虚拟内存池**——guest 先建一个大小 `0x7300000`（约 117 MiB）的纹理虚拟池，再调 `nvnMemoryPoolMapVirtual` 把它**整块别名**到一个同大小的物理池（`runtime/nvn/objects.c` `nvnMemoryPoolMapVirtual`，注释明确写出该尺寸与"whole, once"的映射方式）。虚拟池的 storage 就是那块物理内存（GPU 地址==CPU 地址，`nvnMemoryPoolGetBufferAddress`）。guest 自己的纹理分配器以该虚拟池大小为上限；HD 贴图把 `.bflt` 换大后，guest 侧分配超过 `0x7300000` 即失败，表现为贴图加载错或 OOM。
+`tex_pool_mib` / `SAVAGEWIND_MAX_TEXTURE_POOL` 目前只控制 host 纹理池告警阈值，不扩大 guest 堆、不预分配显存、不保证大贴图能加载。8 GiB 选项也不代表 Deck 有安全可用的 8 GiB 余量。
 
-**为什么不是"在 `nvnMemoryPoolInitialize` 处预留 VMA"（初稿纠正）：** 那一步拿到的是 builder 声明的 size（guest 原值），host 单方面把它抬到 MAX_POOL 也没用——guest 自己的分配器仍按原值算上限，且虚拟池别名要求物理池与虚拟池连续同址、host 重新映射会破坏 guest 已持有的指针稳定。
+guest 分配器与纹理池常数必须按具体游戏版本定位，校验修改前指令和相关分配路径后才能制作配套补丁。不能直接套用其它版本的 `0x7300000` 或从 host 的 NVN 别名映射推断 guest 分配已经增加。
 
-**推荐方案（guest + host 协同，单一 mod 内完成）：** HD 贴图 mod 自带一个 `.ips`（本仓 CA4 已支持的 ExeFS 补丁）改 guest 的纹理池常数（池大小 / 分配器上限），guest 自己按更大的值 `SetStorage` 出更大的物理池 backing；host 侧只放宽两处守卫：`nvnMemoryPoolGetSize` 读 backing 真实值而非截到原声明值、`nvnMemoryPoolMapVirtual` 允许虚拟池别名到更大物理池。host 端以 `MAX_POOL`（`SAVAGEWIND_MAX_TEXTURE_POOL`，MiB，默认 8192、0=沿用 guest 原值）为上限守卫：guest 分配超过即明确报错不静默，物理页由既有 backing 机制按需提交（`runtime/kernel.c` `plat_commit`）。无 mods 时行为与现在一致（guest 原值、零物理增量）。
+验收须使用合法自备的真实 HD 资源及配套代码补丁，核对画面变化、内存峰值、错误日志、移除回滚和无 Mod 基线。尚无此项通过证据，不增加硬件验收标志。
 
-**备选（若实测 guest 不查 GetSize 而硬编码常数）：** 仅 .ips 改 guest 常数即可生效，host 零改动；此路径下"HD 贴图包必须带配套 .ips"成为约定，写进 `docs/data-folder.md` 的 mods 章节。两条路径以 Deck 实跑验证决定取舍，不预设。
+## 后续顺序
 
-**边界与回退：** 上限做成控制栏项（`tex_pool_mib`，画面页"贴图显存上限"，0=游戏默认/512 MiB..8 GiB）与环境变量 `SAVAGEWIND_MAX_TEXTURE_POOL`（MiB，单次运行覆盖）；`plat_commit` 失败（罕见）时回落到"guest 原大小 + 明确错误日志"。8 GiB 对 Deck（16 GiB）安全，留 8 GiB 给系统与其他纹理。
-
-**Host 侧已落地（2026-11-12，本仓 main 之外的 CA4 实现 MR）：** 核实后 host 对池大小本就**零守卫**——guest 的纹理池经 `nvnMemoryPoolSetStorage` 传入自管内存、`MapVirtual` 整块别名（`runtime/nvn/objects.c`），host 不截断也不报错；guest 侧上限是 guest 自己代码里的常数（.ips 可改）。因此 host 侧落地为：① 上限读取器 `settings_tex_pool_cap()`（settings 字段优先、环境变量覆盖、0=不设限，`runtime/settings.c`）；② `nvnMemoryPoolInitialize` 在池超过上限时打明确日志（HD mod 超池不再静默失败，`runtime/nvn/objects.c`）；③ 控制栏画面页"贴图显存上限"下拉 + 持久化（`tex_pool_mib =` ini 字段）+ 中英繁文案；④ 单测 `tests/test_tex_pool.py`（往返 + 环境变量覆盖 + 缺省无上限）。**尚未改行为**：上限目前只报警不拦截，是否硬性拦截与 guest 常数的 .ips 位置以 Deck 实跑定，不预设。
-
-**验收：** 放一个把主角头像 `.bflt` 换成更高分辨率并带配套 `.ips` 的 mod，Deck 实跑截图确认贴图生效且不 OOM；`/proc`/perf 观察纹理池物理页只涨到实际量；无 mods 时内存曲线与基线一致。
-
-## 执行顺序
-
-1. 先补 HD 贴图堆（上文方案，单 MR，`runtime/nvn/objects.c` + `runtime/kernel.c` + 控制栏一行）。
-2. 再拿两个现成 mod（1 个 RomFS 贴图、1 个 `.ips`）在 Deck 上做 CA4 整体验收，把 `competitor-adoption.md` 的 CA4 行 `hardware_validated` 置真。
-3. HD 贴图包与两 mod 一并进 `docs/data-folder.md` 的 mods 章节（目录约定 + 示例）。
-
-## 与 TOTK 的差异
-
-TOTK（UltraTears 上游）目前**无 mods 目录约定**，其 CA4 独立成批，不占用本仓设计。本仓先闭合，TOTK 侧复用「RomFS 覆盖 + IPS」两段即可（其 exefs 布局相同），HD 堆方案视其纹理池实现单独评估，不强行同步。
+1. 完整 CI/审查静态构建链，验证实际补丁后的生成代码与私有运行包。
+2. Deck 隔离存档确认一个代码 Mod、一个真实 RomFS 覆盖和移除回滚。
+3. 完成上述 guest 堆分析，再验证 HD 贴图；随后单独适配 TOTK 的输入和生成链，不放宽两作各自版本门禁。

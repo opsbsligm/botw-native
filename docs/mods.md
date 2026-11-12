@@ -1,19 +1,43 @@
-# Mods 兼容范围与 CA4 构建路线
+# Mods 兼容范围与构建
 
-2026-11-12 源码核验：本仓已有 `runtime/mods.c` 的 RomFS 合并、旧格式代码补丁、mod 指纹与 setup 重建接口；此前竞品矩阵写成“无 mods”不准确。便携包、SDK7 和社区格式的完整链路仍需逐项验收。
+本仓保留 `runtime/mods.c` 的 RomFS 合并、旧 setup 补丁和重建指纹接口。Linux 便携包的静态代码 Mod 使用下面的私有构建入口，代码修改需要重新生成与编译后才能部署。整体 `hardware_validated=false`。
 
-本次修复既有 `<data root>/mods/<名称>/<module>.ips` 接口的标准 IPS/IPS32 解析：`PATCH/EOF` 或 `IPS32/EEOF`，支持逐字节写入（包括零）、RLE、后记录覆盖先记录与 16 MiB 以上偏移。修改前校验全部记录，拒绝截断、缺结束标记、越界、头部修改、调整文件长度和额外尾部数据。私有旧格式 `IPS\x1a` 保留原有零字节跳过规则，不能与标准格式混称。
+## Linux 静态代码 Mod
 
-补丁失败会保留错误、返回失败并撤销旧成功记录，setup 不应继续将未生效的补丁记为完成。复制模块和记录文件采用同目录临时文件、同步及原子替换。NSO 段表按真实字段位置读取并检查文件边界，指纹对压缩段只读取实际存储长度。单个文件替换的原子性不代表多模块事务；失败后应由 setup 从健康来源重新准备全部副本。
+```text
+/private/mods/
+  10-first/exefs/<完整 NSO Build ID>.ips
+  20-later/exefs/可读名称.pchtxt
+  .disabled/exefs/暂不应用.pchtxt
+```
 
-标准 IPS 作用于解压后的 NSO，必须保持 0x100 字节头部和 build ID。现有私有包的 main/subsdk0/sdk 均为压缩 NSO，因此当前代码明确拒绝直接向其套用标准 IPS；不得据此宣称现有社区代码 mod 已在游戏生效。build-ID 文件名匹配、`exefs/` 社区目录、PCHTXT 与自动解压重编译仍在后续 CA4 范围。
+```sh
+python3 build.py build --work /mnt/build/botw-work \
+  --dump /mnt/private/botw-1.6.0 --code-mods /mnt/private/mods
+```
 
-CA4 后续按下列链路推进：
+原始输入与 Mod 根目录只读挂入构建容器；工作目录与输入分离。构建会验证 main/subsdk0/sdk 的精确原始 SHA-256，再解压 NSO 的实际段、核对启用的段摘要，在 AOT 之前应用补丁。
 
-1. 在获准远端构建节点读取受支持版本与 build ID，保留输入；解压到任务独立副本，记录逐文件摘要。
-2. 按明确的目录与名称顺序枚举补丁，验证 build ID，支持标准 IPS/IPS32 和严格的 PCHTXT enabled/disabled/offset_shift 语义；未知指令、版本不符、路径逃逸和越界必须中止。记录补丁集合、输入及输出摘要。
-3. 在生成游戏 C 代码之前应用补丁，将结果纳入生成与编译缓存指纹；删除 mod 后从原始输入重新生成。不得把静态代码改动当作运行时金手指直接写入。
-4. 生成独立可回滚运行包，关联精确源码与 mod 集合；完成 CI、包全文件核验及隔离存档实机回归后，再原子切换入口。Deck 只承接运行包及有限诊断数据。
-5. HD guest 贴图堆扩容先确认版本与指令前值，再生成代码补丁；host 纹理池告警阈值不能当作 guest 扩容。用真实 HD 包检查内存峰值、贴图与崩溃情况。
+目录与文件按 UTF-8 字节排序，后面的记录覆盖前面。点号开头的 Mod 目录停用；无 exefs 的纯 RomFS Mod 不进入代码补丁集合。活动补丁不能使用软链接、设备文件、目录逃逸或不支持的格式。
 
-依据：[Atmosphère loader 的 NSO/IPS 规范](https://github.com/Atmosphere-NX/Atmosphere/blob/master/docs/components/modules/loader.md)。本实现按格式语义独立编写，没有复制该项目的 GPL 代码。新增合成测试经 AddressSanitizer/UndefinedBehaviorSanitizer 验证标准格式、实际模块分派、错误保留、段边界和指纹；不含游戏代码。`hardware_validated=false`。
+- 标准 IPS：`PATCH/EOF`；IPS32：`IPS32/EEOF`。支持零字节、RLE 和大偏移。文件名必须是当前模块完整 Build ID，允许省略完整的尾部零字节，不按任意短前缀猜测版本。
+- PCHTXT：首个有效指令为完整 `@nsobid-...`，支持 `@enabled`、`@disabled`、有符号 `@flag offset_shift`、`@flag print_values`、`@stop`、注释和含 C 风格转义的 UTF-8 字符串。未知指令、错误版本、截断、地址溢出及预算超限均中止。
+- 偏移从标准解压 NSO 文件开始，段内容位于 `0x100 + 段内存偏移`。不能修改 NSO 头、段间空洞、BSS、加载元数据、重定位目标、宿主 HLE 或本应用时钟替换位置。部分依赖这些位置的社区 Mod 会被明确拒绝。
+
+所有活动补丁先完整验证，再准备模块。无实际修改的模块保留原始压缩字节。准备目录通过同文件系统的 Linux `renameat2(RENAME_NOREPLACE)` 原子发布，不覆盖已有目录；复用只允许完整内容核对一致的快照。
+
+生成记录位于工作目录 `generated/static-mods.json`。打包再次验证原始输入、活动补丁、准备模块和 code 阶段回执；任何变化均要求重新生成和编译。包内 `data/exefs` 使用与 AOT 相同的补丁后内容，`provenance/static-mods.json` 记录输入、补丁与输出摘要。
+
+移除代码 Mod 后，使用健康原始 dump，重新执行构建并省略 `--code-mods`，再核验新包。仅删除 Deck 上的补丁文件不能还原已编译代码。部署前保留现用版本，完成精确提交 CI、安全审查、包全部文件校验与实机回归后再原子切换入口。
+
+## 旧 setup 接口
+
+`<data root>/mods/<名称>/<module>.ips` 保留原有行为。标准 IPS/IPS32 会完整校验记录、支持零字节/RLE，并明确拒绝直接修改压缩 NSO。私有 `IPS\x1a` 方言仍按旧约定把零字节视为保留原值，不能与标准格式混称。
+
+旧接口的单文件原子替换不代表多模块事务，也不能自动接入上述 Linux 私有构建链。运行时 RomFS 覆盖、静态代码 Mod 和金手指各自验收，不能以加载文件成功替代游戏效果。
+
+## 验证与剩余工作
+
+原创夹具已验证压缩、版本/边界、原子失败、元数据保护和生成/编译执行：被修改函数实际返回 42。真实 SDK7 输入已完成只读指纹、解压映像一致性及保留区准备核验。真实社区 Mod 的整游戏画面/行为、HD guest 堆扩容、移除回滚仍待实机验收；host 贴图池阈值只是告警。
+
+格式参考：[Atmosphère loader](https://github.com/Atmosphere-NX/Atmosphere/blob/master/docs/components/modules/loader.md)、[IPSwitch 格式说明](https://github.com/3096/ipswitch/blob/master/example/README.md)、[hactool NSO 头](https://github.com/SciresM/hactool/blob/master/nso.h)。实现按格式独立编写，未复制其代码；夹具不含游戏资源。

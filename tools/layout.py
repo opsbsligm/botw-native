@@ -43,25 +43,27 @@ GAME_SUBSDKS = {
 }
 
 
-def foreign(exefs):
+def foreign(exefs, snapshots=None):
     """The subsdk modules in an exefs folder that aren't its known game version's (none for an unknown version)."""
     main = os.path.join(exefs, 'main')
-    known = GAME_SUBSDKS.get(header(main)['build_id'][:16]) if os.path.isfile(main) else None
+    present = (lambda n: n in snapshots) if snapshots is not None else (lambda n: os.path.isfile(os.path.join(exefs, n)))
+    known = GAME_SUBSDKS.get(header(main, raw=snapshots['main'] if snapshots is not None else None)['build_id'][:16]) if present('main') else None
     if known is None:
         return []
-    return [n for n in LOAD_ORDER if n.startswith('subsdk') and n not in known and os.path.isfile(os.path.join(exefs, n))]
+    return [n for n in LOAD_ORDER if n.startswith('subsdk') and n not in known and present(n)]
 
 
-def compute(exefs):
+def compute(exefs, snapshots=None):
     """[(name, base, size, build_id)] of the modules in an exefs folder, in load order."""
     out, base = [], MODULES_LO
-    skip = foreign(exefs)
+    skip = foreign(exefs, snapshots)
     for name in skip:
         print(f"layout: {name} is not one of the game's modules (a mod?): left out", file=sys.stderr)
     for name in LOAD_ORDER:
         path = os.path.join(exefs, name)
-        if os.path.isfile(path) and name not in skip:
-            h = header(path)
+        present = name in snapshots if snapshots is not None else os.path.isfile(path)
+        if present and name not in skip:
+            h = header(path, raw=snapshots[name] if snapshots is not None else None)
             out.append((name, base, image_size(h), h['build_id']))
             base += out[-1][2]
     return out
@@ -77,9 +79,9 @@ def problems(layout):
     return why
 
 
-def checked(exefs):
+def checked(exefs, snapshots=None):
     """compute(), or LayoutError if the runtime could not load it."""
-    layout = compute(exefs)
+    layout = compute(exefs, snapshots)
     why = problems(layout)
     if why:
         raise LayoutError(f'{exefs}: ' + '; '.join(why))

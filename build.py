@@ -33,6 +33,7 @@ def main():
     p.add_argument('command', choices=('doctor', 'toolchain', 'runtime', 'build'))
     p.add_argument('--work', type=external_path, required=True)
     p.add_argument('--dump', type=external_path)
+    p.add_argument('--code-mods', type=external_path, help='Optional private mods root; code patches require regeneration')
     p.add_argument('--distfiles', type=external_path, help='Optional cache of hash-verified public dependency archives')
     p.add_argument('--jobs', type=int, choices=(1, 2, 3, 4), default=2)
     p.add_argument('--stage', choices=('code', 'assets', 'package', 'all'), default='all')
@@ -41,6 +42,11 @@ def main():
         p.error('build requires --dump with a decrypted, updated game directory')
     if a.dump and (a.dump == a.work or a.dump.is_relative_to(a.work) or a.work.is_relative_to(a.dump)):
         p.error('Input dump and output work directories must not overlap')
+    if a.code_mods:
+        if a.command != 'build' or not a.code_mods.is_dir():
+            p.error('--code-mods requires build and an existing private mods directory')
+        if a.code_mods == a.work or a.code_mods.is_relative_to(a.work) or a.work.is_relative_to(a.code_mods):
+            p.error('Private mods and output work directories must not overlap')
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         p.error('Use an x86_64 Linux build host, including Steam Deck Desktop Mode')
     if not shutil.which('docker'):
@@ -80,8 +86,12 @@ def main():
            '--env', 'HOME=/work/home', '--env', 'PYTHONDONTWRITEBYTECODE=1']
     if a.dump:
         cmd += ['--volume', f'{a.dump}:/input:ro']
+    if a.code_mods:
+        cmd += ['--volume', f'{a.code_mods}:/mods:ro']
     cmd += [image, 'python3', '/src/tools/pipeline.py', a.command,
             '--work', '/work', '--jobs', str(a.jobs), '--stage', a.stage]
+    if a.code_mods:
+        cmd += ['--code-mods', '/mods']
     subprocess.run(cmd, check=True)
 
 

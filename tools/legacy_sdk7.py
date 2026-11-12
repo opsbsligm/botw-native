@@ -15,14 +15,17 @@ PINS = {
 }
 
 
-def verify_main(path, base, build_id):
+def verify_main(path, base, build_id, *, raw=None):
     path = Path(path)
     claimed = bytes.fromhex(build_id)
     expected_id = bytes.fromhex(BUILD_ID).ljust(32, b'\0')
     if base != MAIN_BASE or len(claimed) > 32 or claimed.ljust(32, b'\0') != expected_id:
         raise ValueError('SDK7 profile: unexpected main base or build ID')
-    with path.open('rb') as stream:
-        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if raw is None:
+        with path.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    else:
+        digest = hashlib.sha256(raw).hexdigest()
     if digest != PINS['main']:
         raise ValueError('SDK7 profile: original main hash does not match')
     return '1.6.0', {}

@@ -8,10 +8,11 @@ DT_STRSZ, DT_JMPREL, DT_RELRSZ, DT_RELR, DT_RELACOUNT, DT_GNU_HASH = 10, 23, 35,
 R_AARCH64_ABS64, R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT, R_AARCH64_RELATIVE = 257, 1025, 1026, 1027
 
 
-def header(path):
+def header(path, *, raw=None):
     """Segment placement from the NSO header alone (nothing decompressed): what tools/layout.py needs."""
-    with open(path, 'rb') as f:
-        raw = f.read(0x100)
+    if raw is None:
+        with open(path, 'rb') as f:
+            raw = f.read(0x100)
     assert raw[:4] == b'NSO0', path
     seg = [struct.unpack_from('<II', raw, 0x14 + i * 0x10) for i in range(3)]  # (mem_off, size)
     return {'text': seg[0], 'rodata': seg[1], 'data': seg[2], 'bss': struct.unpack_from('<I', raw, 0x3C)[0],
@@ -19,8 +20,10 @@ def header(path):
 
 
 class Nso:
-    def __init__(self, path):
-        raw = open(path, 'rb').read()
+    def __init__(self, path, *, raw=None):
+        if raw is None:
+            with open(path, 'rb') as stream:
+                raw = stream.read()
         assert raw[:4] == b'NSO0', path
         flags = struct.unpack_from('<I', raw, 0xC)[0]
         self.build_id = raw[0x40:0x60].rstrip(b'\0').hex()

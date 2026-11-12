@@ -69,6 +69,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--work', type=Path, required=True)
     p.add_argument('--dump', type=Path, required=True)
+    p.add_argument('--code-mods', type=Path)
     a = p.parse_args()
     work, dump = a.work.resolve(), a.dump.resolve()
     ensure_clean(ROOT)
@@ -84,12 +85,27 @@ def main():
     try:
         from legacy_sdk7 import verify_exefs
         verify_exefs(dump / 'exefs', ['main', 'subsdk0', 'sdk'])
+        from legacy_mods import RECORD, verify_context
+        prepared, static_mods = None, None
+        if a.code_mods is not None:
+            prepared, static_mods = verify_context(work / 'generated', dump / 'exefs', a.code_mods)
+        elif (work / 'generated' / RECORD).exists():
+            raise ValueError('Generated code contains static mods; package with the same --code-mods inputs')
         verify_movies(work, dump)
         executable = 'savagewind'
         shutil.copy2(work / 'game' / executable, staging / executable)
         (staging / 'data').mkdir()
         for name in ('exefs', 'romfs'):
             copy_tree(dump / name, staging / 'data' / name)
+        if prepared is not None:
+            for name, raw in prepared.modules.items():
+                # 与生成器相同的快照；运行时 rodata/data 也必须使用修改后的 NSO。
+                path = staging / 'data/exefs' / name
+                path.unlink()
+                path.write_bytes(raw)
+            provenance = staging / 'provenance'
+            provenance.mkdir(exist_ok=True)
+            (provenance / RECORD).write_text(json.dumps(static_mods, sort_keys=True, indent=2) + '\n')
         verify_movies(work, staging / 'data')
         for name in ('aoc1', 'aoc2'):
             if (dump / name).is_dir():
@@ -125,6 +141,8 @@ def main():
             private_game_content=True, hardware_validated=False,
             files={path.relative_to(staging).as_posix(): dict(size=path.stat().st_size, sha256=digest(path))
                    for path in sorted(staging.rglob('*')) if path.is_file()})
+        if static_mods is not None:
+            manifest['static_mods'] = static_mods
         (staging / 'bundle.json').write_text(json.dumps(manifest, indent=2) + '\n')
         staging.rename(target)
         print('Private package ready: ' + str(target))
