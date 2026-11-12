@@ -8,6 +8,7 @@
 
 #define MODS_VIEW_MARKER ".native-romfs-view"
 #define MODS_VIEW_MAGIC "native-romfs-view-v1\n"
+#define MODS_VIEW_DISCARDABLE ".native-romfs-discardable"
 #define MODS_VIEW_PARENT "native-mods"
 #define MODS_VIEW_NAME "romfs-view"
 #define MODS_VIEW_PATH MODS_VIEW_PARENT "/" MODS_VIEW_NAME
@@ -35,6 +36,12 @@ static bool mods_view_owned(int fd) {
               !memcmp(marker, MODS_VIEW_MAGIC, sizeof MODS_VIEW_MAGIC - 1);
     close(input);
     return ok;
+}
+
+static bool mods_view_discardable(int fd) {
+    struct stat marker;
+    return !fstatat(fd, MODS_VIEW_DISCARDABLE, &marker, AT_SYMLINK_NOFOLLOW) &&
+           S_ISREG(marker.st_mode) && marker.st_uid == geteuid() && marker.st_size == 0;
 }
 
 // Only task-owned view directories are passed here. Never traverse a symlink,
@@ -82,7 +89,7 @@ static bool mods_view_collect_stale(int parent) {
         if (!kill((pid_t)owner, 0) || errno != ESRCH) { errno = 0; continue; }
         int child = openat(parent, name, MODS_DIR_FLAGS);
         if (child < 0) { errno = 0; continue; }
-        bool owned = mods_view_owned(child);
+        bool owned = mods_view_owned(child) && mods_view_discardable(child);
         close(child);
         if (owned && !mods_view_remove(parent, name, 0)) { ok = false; break; }
         errno = 0;
@@ -172,6 +179,11 @@ static int mods_linux_romfs_apply(void) {
     bool marked = write(marker, MODS_VIEW_MAGIC, sizeof MODS_VIEW_MAGIC - 1) == (ssize_t)(sizeof MODS_VIEW_MAGIC - 1) && !fsync(marker);
     close(marker);
     if (!marked) goto done;
+    int discard = openat(staging, MODS_VIEW_DISCARDABLE, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (discard < 0) goto done;
+    bool discard_ready = !fsync(discard);
+    close(discard);
+    if (!discard_ready) goto done;
     if (mods >= 0) {
         DIR *directory = mods_view_scan(mods);
         if (!directory) goto done;
@@ -212,6 +224,10 @@ static int mods_linux_romfs_apply(void) {
         if (!owned) { errno = EACCES; goto done; }
     }
     if (files) {
+        // A published view can become the only recovery copy after an exchange.
+        // Remove discard permission durably before publication, so even a later
+        // I/O failure cannot cause next-start cleanup to delete that copy.
+        if (unlinkat(staging, MODS_VIEW_DISCARDABLE, 0) || fsync(staging)) goto done;
         if (syscall(SYS_renameat2, parent, temporary, parent, MODS_VIEW_NAME,
                     previous >= 0 ? MODS_RENAME_EXCHANGE : MODS_RENAME_NOREPLACE)) goto done;
         // EXCHANGE leaves the previous owned view at our private staging name.

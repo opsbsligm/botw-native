@@ -12,11 +12,24 @@ HARNESS = r'''
 #include "mods.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 int __real_fsync(int fd);
+long __real_syscall(long number, ...);
+long __wrap_syscall(long number, ...) {
+ static int renames;
+ if(number!=SYS_renameat2) { errno=ENOSYS;return -1; }
+ va_list args;va_start(args,number);
+ int source=va_arg(args,int);const char *old=va_arg(args,const char *);
+ int target=va_arg(args,int);const char *name=va_arg(args,const char *);int flags=va_arg(args,int);
+ va_end(args);
+ if(++renames==2 && getenv("MODS_TEST_FAIL_ROLLBACK")) {errno=EIO;return -1;}
+ return __real_syscall(number,source,old,target,name,flags);
+}
 int __wrap_fsync(int fd) {
  static int injected;
  struct stat actual,parent;
@@ -50,7 +63,7 @@ class PortableRomfsMods(unittest.TestCase):
         cls.binary = directory / 'check'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
                         '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                        '-Wl,--wrap=fsync',
+                        '-Wl,--wrap=fsync', '-Wl,--wrap=syscall',
                         '-I', str(ROOT / 'runtime'), str(source), str(ROOT / 'runtime/mods.c'),
                         '-o', str(cls.binary)], check=True, capture_output=True, text=True, timeout=30)
 
@@ -179,6 +192,7 @@ class PortableRomfsMods(unittest.TestCase):
         stale = self.root / 'native-mods/.romfs-new-2147483646-1'
         stale.mkdir(mode=0o700)
         (stale / '.native-romfs-view').write_bytes(b'native-romfs-view-v1\n')
+        (stale / '.native-romfs-discardable').touch()
         outside = self.put('outside/keep.bin', b'preserve')
         (stale / 'external').symlink_to(outside.parent, target_is_directory=True)
         # Unknown staging contents have no ownership marker and must remain.
@@ -190,3 +204,22 @@ class PortableRomfsMods(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertEqual((unknown / 'keep').read_bytes(), b'unknown')
         self.assertEqual(outside.read_bytes(), b'preserve')
+
+    def test_failed_rollback_recovery_copy_survives_the_next_start(self):
+        source = self.put('mods/active/romfs/a.bin', b'original-view')
+        self.apply(1)
+        source.unlink()
+        self.put('mods/active/romfs/a.bin', b'new-view')
+        env = dict(os.environ, MODS_TEST_FAIL_PARENT_SYNC='1', MODS_TEST_FAIL_ROLLBACK='1')
+        result = subprocess.run([str(self.binary), str(self.root)], capture_output=True, text=True, timeout=10, env=env)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('rollback failed', result.stderr)
+        retained = list((self.root / 'native-mods').glob('.romfs-new-*'))
+        self.assertEqual(len(retained), 1)
+        self.assertEqual((retained[0] / 'a.bin').read_bytes(), b'original-view')
+        self.assertFalse((retained[0] / '.native-romfs-discardable').exists())
+        restarted = subprocess.run([str(self.binary), str(self.root)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(restarted.returncode, 0, restarted.stdout + restarted.stderr)
+        self.assertEqual(list((self.root / 'native-mods').glob('.romfs-new-*')), retained)
+        self.assertEqual((retained[0] / 'a.bin').read_bytes(), b'original-view')
+        self.assertEqual((self.view / 'a.bin').read_bytes(), b'new-view')
