@@ -19,6 +19,13 @@ static const char *settings_file(void) {
     const char *e = getenv("SAVAGEWIND_SETTINGS");
     return e && *e ? e : "savagewind.ini";
 }
+// CA4 HD texture packs: the texture pool cap in bytes (settings field, env override for one-offs; 0: no cap).
+uint64_t settings_tex_pool_cap(void) {
+    int mib = g_settings.tex_pool_mib;
+    const char *e = getenv("SAVAGEWIND_MAX_TEXTURE_POOL");
+    if (e) mib = atoi(e);
+    return mib > 0 ? (uint64_t)mib << 20 : 0;
+}
 
 Settings g_settings = {
     .control_bar_anchor = 4,
@@ -106,6 +113,10 @@ void settings_load(void) {
         else if (!strcmp(key, "anisotropy")) {  // (game, 2x .. 16x)
             int a = atoi(val);
             g_settings.anisotropy = a >= 16 ? 4 : a >= 8 ? 3 : a >= 4 ? 2 : a >= 2 ? 1 : 0;
+        }
+        else if (!strcmp(key, "tex_pool_mib")) {  // (CA4: HD texture packs raise the guest's texture pool)
+            int m = atoi(val);
+            g_settings.tex_pool_mib = m < 0 ? 0 : m;
         }
         else if (!strcmp(key, "frame_generation")) g_settings.frame_gen = atoi(val) != 0;
         else if (!strcmp(key, "sharpening")) {  // (percent, in steps of 10)
@@ -250,6 +261,7 @@ void settings_save(void) {
     int an = g_settings.anisotropy;
     if (an >= 1 && an <= 4) fprintf(f, "anisotropy = %dx\n", 1 << an);
     else fprintf(f, "anisotropy = game\n");
+    if (g_settings.tex_pool_mib > 0) fprintf(f, "tex_pool_mib = %d\n", g_settings.tex_pool_mib);
     fprintf(f, "sharpening = %d\n", g_settings.sharpening * 10);
     fprintf(f, "frame_generation = %d\n", g_settings.frame_gen ? 1 : 0);
     fprintf(f, "dpad_move = %d\n", g_settings.dpad_move);
