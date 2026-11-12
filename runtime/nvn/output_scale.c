@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "../framepace.h"
@@ -118,7 +119,9 @@ double upscale_factor(void) {
 
 // The window's shape over 16:9 while the game's views are widened to fill it, else 1; the field of view's factor in
 // use (rt_persp)
-static volatile float g_view_shape = 1, g_fov = 1;
+// Renderer publishes these to guest projection calls on the game threads.
+// Volatile alone does not synchronize concurrent C accesses.
+static _Atomic float g_view_shape = 1, g_fov = 1;
 static uint32_t g_world_proj[4];  // tan(fovy / 2), aspect, near, far of the world camera's last matrix (rt_persp), float bits
 
 void output_scale(double dw, double dh, bool reshape_allowed, OutScale *o) {
