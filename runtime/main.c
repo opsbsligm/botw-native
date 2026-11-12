@@ -163,7 +163,7 @@ static bool plain_start_ready(const char *root) {
 }
 
 static void boot(const char *root) {
-    mods_romfs_apply();  // (the player's mods: the overlay view, before the game files open)
+    if (mods_romfs_apply() < 0) FATAL("RomFS mods could not be prepared; see the log for details\n");
     char exefs[1024], romfs[1024], npdm_path[1024];
     snprintf(exefs, sizeof exefs, "%s/exefs", root);
     snprintf(romfs, sizeof romfs, "%s/romfs", root);

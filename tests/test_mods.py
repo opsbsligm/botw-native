@@ -39,6 +39,13 @@ C_MAIN = r'''
 #include <sys/stat.h>
 #include <unistd.h>
 static char g_root[1024];
+#ifdef __linux__
+#define VIEW "native-mods/romfs-view"
+#define HELLO VIEW "/Hello.txt"
+#else
+#define VIEW "extracted/.mods-view"
+#define HELLO VIEW "/romfs/Hello.txt"
+#endif
 const char *rt_data_root(void) { return g_root; }
 static int file_exists(const char *p) { struct stat sb; return stat(p, &sb) == 0; }
 static void mkdirs_of(char *p) { char *s = p; while ((s = strchr(s, '/'))) { *s = 0; mkdir(p, 0755); *s = '/'; s++; } }
@@ -60,15 +67,15 @@ int main(int argc, char **argv) {
     mkdirs_of(path);
     FILE *f = fopen(path, "w"); fprintf(f, "mod"); fclose(f);
     assert(mods_romfs_apply() == 1);
-    assert(!strcmp(getenv("SAVAGEWIND_ROMFS_OVERLAY"), "extracted/.mods-view"));
-    assert(file_exists("extracted/.mods-view/romfs/Hello.txt"));
+    assert(!strcmp(getenv("SAVAGEWIND_ROMFS_OVERLAY"), VIEW));
+    assert(file_exists(HELLO));
     // a second mod overrides the first (the link is re-made)
     snprintf(path, sizeof path, "mods/02mod/romfs/Hello.txt");
     mkdirs_of(path);
     f = fopen(path, "w"); fprintf(f, "mod2"); fclose(f);
     assert(mods_romfs_apply() == 2);  // (each mod's file linked; the second's link over the first's)
     char buf[16] = {0};
-    f = fopen("extracted/.mods-view/romfs/Hello.txt", "r");
+    f = fopen(HELLO, "r");
     assert(fread(buf, 1, 15, f) == 4);
     fclose(f);
     assert(!strcmp(buf, "mod2"));

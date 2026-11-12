@@ -68,6 +68,7 @@ static bool is_dir(const char *p) {
     return stat(p, &sb) == 0 && S_ISDIR(sb.st_mode);
 }
 
+#ifndef __linux__
 static void remove_tree(const char *p) {
     if (!p || !*p) return;
     DIR *d = opendir(p);
@@ -83,6 +84,7 @@ static void remove_tree(const char *p) {
     }
     rmdir(p);
 }
+#endif
 
 const char *mods_dir(void) {
     static char out[1024];
@@ -110,6 +112,7 @@ bool mods_present(void) {
 
 // ------------------------------------------------------------------ the RomFS mods: one merged view for the overlay
 
+#ifndef __linux__
 static void walk_stage(const char *dir, const char *rel, const char *view, int *nfiles) {
     struct dirent *e;
     DIR *d = opendir(dir);
@@ -147,8 +150,14 @@ static void walk_stage(const char *dir, const char *rel, const char *view, int *
     }
     closedir(d);
 }
+#else
+#include "mods_romfs_linux.h"
+#endif
 
 int mods_romfs_apply(void) {
+#ifdef __linux__
+    return mods_linux_romfs_apply();
+#else
     static char mods[1024], view[1024];
     snprintf(mods, sizeof mods, "%s", mods_dir());
     snprintf(view, sizeof view, "%s", "extracted/.mods-view");
@@ -184,6 +193,7 @@ int mods_romfs_apply(void) {
             unsetenv("SAVAGEWIND_ROMFS_OVERLAY");
     }
     return 0;
+#endif
 }
 
 // ------------------------------------------------------------------ SHA-256 (the mods' fingerprint; the stdlib has no portable one)
