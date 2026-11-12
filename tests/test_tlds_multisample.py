@@ -13,6 +13,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(sys.platform == 'linux', 'Vulkan Linux shaderc toolchain')
 class TldsMultisample(unittest.TestCase):
+    def test_hardware_harness_builds_without_running(self):
+        deps = Path(os.environ.get('NATIVE_DEPS', '/opt/native-deps/build/linux/x86_64/deps'))
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:
+            subprocess.run([shutil.which('clang') or 'cc', '-std=gnu11', '-O1',
+                '-isystem', str(deps / 'include'), '-L', str(deps / 'lib'),
+                str(ROOT / 'tests/tlds_multisample_gpu.c'), str(ROOT / 'runtime/nvn/maxwell/translate.c'),
+                '-lshaderc_shared', '-lvulkan', '-lm', '-o', str(Path(tmp) / 'tlds-ms-gpu')],
+                check=True, timeout=60)
+
     def test_translation_and_spirv(self):
         deps = Path(os.environ.get('NATIVE_DEPS', '/opt/native-deps/build/linux/x86_64/deps'))
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as tmp:

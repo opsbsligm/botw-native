@@ -18,3 +18,7 @@ clang -std=gnu11 -O1 -I runtime -isystem "$NATIVE_DEPS/include" \
 指令语义参照 [envytools GM107 ISA 表](https://github.com/envytools/envytools/blob/master/envydis/gm107.c)，图像读取与资源约束参照 [Vulkan Sampling](https://docs.vulkan.org/spec/latest/chapters/textures.html) 和 [VkImageCreateInfo](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageCreateInfo.html)。实现未复制其他许可证不兼容项目的代码。预热完成判定和其余 SULD/SUST 缺口单独验收，问题 #1 保持开放。
 
 2026-11-12 私有构建节点定向复查：生产归档读取器识别 13,869 个唯一 shader，原先因 `tlds info 6` 失败的 4 个片段 shader 均找到、翻译成功且通过 shaderc 生成 SPIR-V，工具退出码 0。该结论限于此 4 项的源码翻译/编译；其余 20 项 SULD/SUST、真实 Vulkan 管线、多重采样画面及完整预热仍待验证。
+
+同日 Deck 原生 GPU 核验：`tests/tlds_multisample_gpu.c` 在 AMD Custom GPU 0405 / RADV VANGOGH 上向 4 个 sample 写入不同数值，再通过生产 Maxwell 翻译器生成的 TLDS compute shader 分别读取，全部 16 个浮点通道与预期精确一致，退出码 0。测试无窗口、不加载游戏；输出缓冲是测试额外添加的观测点，TLDS 指令翻译与寄存器赋值未替换。必要证据已逐成员 SHA 核验，临时程序和隔离驱动缓存已清理。此结果验证合成指令的 GPU 读值，不等于游戏片段管线、绑定路径及场景画面通过，`hardware_validated=false`。
+
+CI 只编译此 GPU 测试程序，不在 Runner 上尝试硬件校验。手动执行必须设置任务独立的 `MESA_SHADER_CACHE_DIR` 和 `XDG_CACHE_HOME`，并在证据回读后清理。缺少所需硬件特性时退出 77，不记为通过。
