@@ -77,7 +77,7 @@ typedef struct {
     int hdr;             // HDR_* (runtime/nvn/vulkan/device.c hdr_*)
     int hdr_white;       // nits of SDR white in HDR (0: what Windows gives SDR content on that monitor)
     int fov;             // field of view in play, percent of the game's own (FOV_CHOICES)
-    int tex_pool_mib;    // max texture pool size in MiB (0: no cap, the guest's own value; CA4 HD texture packs)
+    int tex_pool_mib;    // texture pool warning threshold in MiB (0: no warning); does not resize guest memory
     // Video > Colour (runtime/color_grade.h): 0 everywhere and no LUT = the game's own colours (nothing runs)
     int color_exposure;      // tenths of an EV, -20..20
     int color_contrast;      // percent, -50..50
@@ -103,4 +103,4 @@ extern Settings g_settings;
 
 void settings_load(void);
 void settings_save(void);
-uint64_t settings_tex_pool_cap(void);  // (CA4: 0 = no cap, the guest's own pool size)
+uint64_t settings_tex_pool_cap(void);  // legacy API: warning threshold in bytes, 0 disables warnings

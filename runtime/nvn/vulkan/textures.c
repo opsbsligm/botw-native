@@ -1301,10 +1301,11 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
     }
     VkImageAspectFlags aspect = b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect;
     VkComponentMapping sw = IDENTITY;
-    if (!(b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) && b->samples == 1) sw = vk_sample_swizzle(t, v);
+    if (!(b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT))) sw = vk_sample_swizzle(t, v);
     VkImageViewType want = view_type_for(want_textype);
     VkImageViewType have = b->base_type;
-    if (b->samples > 1) return vk_dummy_view(want_textype);  // multisampled images can't be sampled as 2D
+    // A multisampled view must match a multisampled shader image, including the unbound fallback.
+    if ((b->samples > 1) != (want_textype == TEXTYPE_2D_MS)) return vk_dummy_view(want_textype);
     if (want == have) {
         if (have == VK_IMAGE_VIEW_TYPE_CUBE) nly = 6;
         return vk_image_view(b, want, fmt, lv0, nlv, ly0, nly, sw, aspect);
@@ -1337,11 +1338,21 @@ VkImageView vk_dummy_view(int textype) {
     TexBackend *b = &dummies[textype];
     VkImageViewType vt = view_type_for(textype);
     bool cube = vt == VK_IMAGE_VIEW_TYPE_CUBE || vt == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+    if (textype == TEXTYPE_2D_MS) {
+        VkImageFormatProperties props;
+        VK_CHECK(vkGetPhysicalDeviceImageFormatProperties(g_vk.phys, VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &props));
+        // Choose an actually supported multisample count, never a single-sample stand-in.
+        for (uint32_t n = 2; n <= 64; n <<= 1)
+            if (props.sampleCounts & n) { samples = (VkSampleCountFlagBits)n; break; }
+        if (samples == VK_SAMPLE_COUNT_1_BIT) FATAL("No multisampled fallback texture supported\n");
+    }
     VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
                             .imageType = vt == VK_IMAGE_VIEW_TYPE_3D ? VK_IMAGE_TYPE_3D
                                        : vt == VK_IMAGE_VIEW_TYPE_1D || vt == VK_IMAGE_VIEW_TYPE_1D_ARRAY ? VK_IMAGE_TYPE_1D : VK_IMAGE_TYPE_2D,
                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {1, 1, 1}, .mipLevels = 1, .arrayLayers = cube ? 6 : 1,
-                            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .samples = samples, .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
     VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
     VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &b->image, &b->mem, NULL));
@@ -1351,6 +1362,7 @@ VkImageView vk_dummy_view(int textype) {
     VkImageSubresourceRange all = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, cube ? 6 : 1};
     vkCmdClearColorImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
     b->format = VK_FORMAT_R8G8B8A8_UNORM;
+    b->samples = samples;
     b->levels = 1;
     b->layers = cube ? 6 : 1;
     views[textype] = vk_image_view(b, vt, b->format, 0, 1, 0, cube ? 6 : 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);

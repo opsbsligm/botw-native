@@ -289,6 +289,10 @@ static int precompile_shaders(const char *root) {
     pthread_join(t, NULL);
     fprintf(stderr, "\n[precompile] %s: %d shaders, %d translations (%d made, %d cached, %d failed) in %.1f s%s%s\n",
             ok ? "done" : "stopped", p.shaders, p.keys, p.made, p.cached, p.failed, p.seconds, ok ? "" : ": ", ok ? "" : p.why);
+    // Returning through the normal Vulkan atexit hook always reports success. Preserve the CLI outcome while
+    // performing the same GPU wait/cache flush and avoiding driver-library teardown.
+    extern void ui_window_exit(int status);
+    ui_window_exit(ok ? 0 : 1);
     return ok ? 0 : 1;
 }
 #endif

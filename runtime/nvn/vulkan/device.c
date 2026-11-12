@@ -1925,7 +1925,7 @@ void vk_shaders_init(void);
 
 // exit() from any thread: let the GPU finish, keep the pipeline cache, then end the process without the DLL
 // teardown (driver / validation-layer threads can stall it for minutes while the game's threads still run).
-static void quick_exit_handler(void) {
+void ui_window_exit(int status) {
     static int trace = -1;
     if (trace < 0) trace = getenv("SAVAGEWIND_VK_TRACE") != NULL;
     if (trace) LOG("[vk] exit: waiting for the GPU\n");
@@ -1943,9 +1943,11 @@ static void quick_exit_handler(void) {
     fflush(stdout);
     fflush(stderr);
 #if defined(_WIN32) || defined(__linux__)
-    plat_terminate();
+    plat_terminate(status);
 #endif
 }
+
+static void quick_exit_handler(void) { ui_window_exit(0); }
 
 void ui_window_init(void) {
     if (window) return;

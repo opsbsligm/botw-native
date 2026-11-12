@@ -410,7 +410,7 @@ NVN(nvnMemoryPoolInitialize) {
     p->flags = G(uint32_t, A(1), 8);
     uint64_t cap = settings_tex_pool_cap();
     if (cap && p->size > cap)
-        LOG("[nvn] memory pool %#llx exceeds the texture pool cap %#llx: an HD mod outgrew the cap\n",
+        LOG("[nvn] memory pool %#llx exceeds the warning threshold %#llx; memory size is unchanged\n",
             (unsigned long long)p->size, (unsigned long long)cap);
     SET_HOST(A(0), p);
     RET(1);

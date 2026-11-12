@@ -19,7 +19,7 @@ static const char *settings_file(void) {
     const char *e = getenv("SAVAGEWIND_SETTINGS");
     return e && *e ? e : "savagewind.ini";
 }
-// CA4 HD texture packs: the texture pool cap in bytes (settings field, env override for one-offs; 0: no cap).
+// Texture pool warning threshold in bytes (legacy option/API names; 0 disables the warning).
 uint64_t settings_tex_pool_cap(void) {
     int mib = g_settings.tex_pool_mib;
     const char *e = getenv("SAVAGEWIND_MAX_TEXTURE_POOL");
@@ -114,7 +114,7 @@ void settings_load(void) {
             int a = atoi(val);
             g_settings.anisotropy = a >= 16 ? 4 : a >= 8 ? 3 : a >= 4 ? 2 : a >= 2 ? 1 : 0;
         }
-        else if (!strcmp(key, "tex_pool_mib")) {  // (CA4: HD texture packs raise the guest's texture pool)
+        else if (!strcmp(key, "tex_pool_mib")) {  // warning threshold, not guest heap expansion
             int m = atoi(val);
             g_settings.tex_pool_mib = m < 0 ? 0 : m;
         }
