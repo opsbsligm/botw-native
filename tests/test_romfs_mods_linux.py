@@ -10,9 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 HARNESS = r'''
 #define _DEFAULT_SOURCE 1
 #include "mods.h"
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
+int __real_fsync(int fd);
+int __wrap_fsync(int fd) {
+ static int injected;
+ struct stat actual,parent;
+ if(!injected && getenv("MODS_TEST_FAIL_PARENT_SYNC") && !fstat(fd,&actual) &&
+    !fstatat(AT_FDCWD,"native-mods",&parent,AT_SYMLINK_NOFOLLOW) &&
+    actual.st_dev==parent.st_dev && actual.st_ino==parent.st_ino) {
+  injected=1;errno=EIO;fputs("INJECTED_PARENT_FSYNC\n",stderr);return -1;
+ }
+ return __real_fsync(fd);
+}
 const char *rt_data_root(void) { return "."; }
 int main(int argc, char **argv) {
  if(argc!=2 || chdir(argv[1])) return 2;
@@ -36,6 +50,7 @@ class PortableRomfsMods(unittest.TestCase):
         cls.binary = directory / 'check'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
                         '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+                        '-Wl,--wrap=fsync',
                         '-I', str(ROOT / 'runtime'), str(source), str(ROOT / 'runtime/mods.c'),
                         '-o', str(cls.binary)], check=True, capture_output=True, text=True, timeout=30)
 
@@ -51,8 +66,13 @@ class PortableRomfsMods(unittest.TestCase):
         path.write_bytes(data)
         return path
 
-    def apply(self, count=None):
-        result = subprocess.run([str(self.binary), str(self.root)], capture_output=True, text=True, timeout=10)
+    def apply(self, count=None, fail_sync=False):
+        env = dict(os.environ)
+        if fail_sync:
+            env['MODS_TEST_FAIL_PARENT_SYNC'] = '1'
+        result = subprocess.run([str(self.binary), str(self.root)], capture_output=True, text=True, timeout=10, env=env)
+        if fail_sync:
+            self.assertIn('INJECTED_PARENT_FSYNC', result.stderr)
         if count is None:
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn('OVERLAY external-user-overlay', result.stdout)
@@ -130,6 +150,19 @@ class PortableRomfsMods(unittest.TestCase):
         self.apply(2)
         self.assertEqual(outside.read_bytes(), b'preserve')
         self.assertFalse((self.view / 'external').exists())
+
+    def test_publication_sync_failure_restores_previous_view(self):
+        source = self.put('mods/active/romfs/a.bin', b'healthy')
+        self.apply(1)
+        source.unlink()
+        self.put('mods/active/romfs/a.bin', b'new')
+        self.apply(fail_sync=True)
+        self.assertEqual((self.view / 'a.bin').read_bytes(), b'healthy')
+
+    def test_first_publication_sync_failure_leaves_no_view(self):
+        self.put('mods/active/romfs/a.bin')
+        self.apply(fail_sync=True)
+        self.assertFalse(self.view.exists())
 
     def test_directory_depth_and_mod_count_fail_closed(self):
         self.put('mods/deep/romfs/' + 'd/' * 34 + 'file.bin')

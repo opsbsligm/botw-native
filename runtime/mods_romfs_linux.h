@@ -15,6 +15,14 @@
 #define MODS_RENAME_NOREPLACE 1
 #define MODS_RENAME_EXCHANGE 2
 
+static DIR *mods_view_scan(int fd) {
+    int scan = dup(fd);
+    if (scan < 0) return NULL;
+    DIR *directory = fdopendir(scan);
+    if (!directory) close(scan);
+    return directory;
+}
+
 static bool mods_view_owned(int fd) {
     char marker[sizeof MODS_VIEW_MAGIC] = {0};
     struct stat directory, file;
@@ -54,7 +62,7 @@ static bool mods_view_remove(int parent, const char *name, unsigned depth) {
 }
 
 static bool mods_view_collect_stale(int parent) {
-    DIR *directory = fdopendir(dup(parent));
+    DIR *directory = mods_view_scan(parent);
     if (!directory) return false;
     struct dirent *entry;
     bool ok = true;
@@ -165,7 +173,7 @@ static int mods_linux_romfs_apply(void) {
     close(marker);
     if (!marked) goto done;
     if (mods >= 0) {
-        DIR *directory = fdopendir(dup(mods));
+        DIR *directory = mods_view_scan(mods);
         if (!directory) goto done;
         DirEntry names[64];
         int count = 0;
@@ -208,7 +216,17 @@ static int mods_linux_romfs_apply(void) {
                     previous >= 0 ? MODS_RENAME_EXCHANGE : MODS_RENAME_NOREPLACE)) goto done;
         // EXCHANGE leaves the previous owned view at our private staging name.
         pending = previous >= 0;
-        if (fsync(parent) || setenv("SAVAGEWIND_ROMFS_OVERLAY", MODS_VIEW_PATH, 1)) goto done;
+        if (fsync(parent) || setenv("SAVAGEWIND_ROMFS_OVERLAY", MODS_VIEW_PATH, 1)) {
+            int failure = errno;
+            long restored = previous >= 0
+                ? syscall(SYS_renameat2, parent, temporary, parent, MODS_VIEW_NAME, MODS_RENAME_EXCHANGE)
+                : syscall(SYS_renameat2, parent, MODS_VIEW_NAME, parent, temporary, MODS_RENAME_NOREPLACE);
+            pending = !restored;
+            if (restored) LOG("[mods] RomFS publication rollback failed; owned views retained for inspection\n");
+            else (void)fsync(parent);
+            errno = failure;
+            goto done;
+        }
         g_view = MODS_VIEW_PATH;
     } else {
         if (previous >= 0 && !mods_view_remove(parent, MODS_VIEW_NAME, 0)) goto done;
