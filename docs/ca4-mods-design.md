@@ -24,18 +24,17 @@ CA4 三块能力，全部以「玩家数据目录 `mods/`，缺省即无副作�
 
 ## 未闭合：HD 贴图堆扩容（唯一子项）
 
-**根因：** BOTW 1.8.2 的纹理走 NVN 内存池：guest 在 setup 期用固定大小调 `nvnMemoryPoolInitialize`（`runtime/nvn/objects.c:402`）建池，`nvnMemoryAllocate` 从池中分配；池的 storage 由 `nvnMemoryPoolBuilderSetStorage` 指定、CPU/GPU 地址同址（`objects.c:417-418`）。HD 贴图包把 `.bflt` 换大后，`nvnMemoryAllocate` 的字节需求超出池容量即失败，guest 侧表现为贴图加载错或 OOM。
+**真实锚点（origin/main 代码核实）：** BOTW 1.8.2 的纹理是 NVN **虚拟内存池**——guest 先建一个大小 `0x7300000`（约 117 MiB）的纹理虚拟池，再调 `nvnMemoryPoolMapVirtual` 把它**整块别名**到一个同大小的物理池（`runtime/nvn/objects.c` `nvnMemoryPoolMapVirtual`，注释明确写出该尺寸与"whole, once"的映射方式）。虚拟池的 storage 就是那块物理内存（GPU 地址==CPU 地址，`nvnMemoryPoolGetBufferAddress`）。guest 自己的纹理分配器以该虚拟池大小为上限；HD 贴图把 `.bflt` 换大后，guest 侧分配超过 `0x7300000` 即失败，表现为贴图加载错或 OOM。
 
-**推荐方案（惰性扩容，单一改动面）：** 在 `nvnMemoryPoolInitialize` 处把该池的**地址空间上限**抬到可配置最大值 `MAX_POOL`（默认 8 GiB，Deck 内存充足），而**物理页按需提交**：storage 区以匿名映射预留 `MAX_POOL`，guest 首次写/读才 `plat_commit` 对应页（`runtime/kernel.c:315` 已有 `plat_commit` 语义）。guest 视角池子"无限"，宿主视角内存只涨到实际使用量。
+**为什么不是"在 `nvnMemoryPoolInitialize` 处预留 VMA"（初稿纠正）：** 那一步拿到的是 builder 声明的 size（guest 原值），host 单方面把它抬到 MAX_POOL 也没用——guest 自己的分配器仍按原值算上限，且虚拟池别名要求物理池与虚拟池连续同址、host 重新映射会破坏 guest 已持有的指针稳定。
 
-**为什么不用别的：**
-- *直接按 mod 声明扩容*：需要 mod 侧约定头部与字节量，把简单贴图 mod 也拖进"必须声明"的负担；
-- *池满了再重建*：要停帧、重放 guest 分配序列，复杂度远高于预留；
-- *只扩不预留*：VMA 地址必须连续（GPU 地址==CPU 地址假设），动态扩地址会破坏已提交页的地址稳定性。
+**推荐方案（guest + host 协同，单一 mod 内完成）：** HD 贴图 mod 自带一个 `.ips`（本仓 CA4 已支持的 ExeFS 补丁）改 guest 的纹理池常数（池大小 / 分配器上限），guest 自己按更大的值 `SetStorage` 出更大的物理池 backing；host 侧只放宽两处守卫：`nvnMemoryPoolGetSize` 读 backing 真实值而非截到原声明值、`nvnMemoryPoolMapVirtual` 允许虚拟池别名到更大物理池。host 端以 `MAX_POOL`（`SAVAGEWIND_MAX_TEXTURE_POOL`，MiB，默认 8192、0=沿用 guest 原值）为上限守卫：guest 分配超过即明确报错不静默，物理页由既有 backing 机制按需提交（`runtime/kernel.c` `plat_commit`）。无 mods 时行为与现在一致（guest 原值、零物理增量）。
 
-**边界与回退：** `MAX_POOL` 做成控制栏/环境变量 `SAVAGEWIND_MAX_TEXTURE_POOL`（MiB，0=沿用 guest 原值），默认 8192；`plat_commit` 失败（罕见）时回落到"guest 原大小 + 明确错误日志"，不静默。无 mods 时行为与现在完全一致（预留不提交，零物理增量）。
+**备选（若实测 guest 不查 GetSize 而硬编码常数）：** 仅 .ips 改 guest 常数即可生效，host 零改动；此路径下"HD 贴图包必须带配套 .ips"成为约定，写进 `docs/data-folder.md` 的 mods 章节。两条路径以 Deck 实跑验证决定取舍，不预设。
 
-**验收：** 放一个把主角头像 `.bflt` 换成更高分辨率的 mod，Deck 实跑截图确认贴图生效且不 OOM；`/proc` 或 perf 观察纹理池物理页只涨到实际量；无 mods 时内存曲线与基线一致。
+**边界与回退：** `MAX_POOL` 做成控制栏/环境变量可调；`plat_commit` 失败（罕见）时回落到"guest 原大小 + 明确错误日志"。默认 8192 MiB 对 Deck（16 GiB）安全，留 8 GiB 给系统与其他纹理。
+
+**验收：** 放一个把主角头像 `.bflt` 换成更高分辨率并带配套 `.ips` 的 mod，Deck 实跑截图确认贴图生效且不 OOM；`/proc`/perf 观察纹理池物理页只涨到实际量；无 mods 时内存曲线与基线一致。
 
 ## 执行顺序
 
