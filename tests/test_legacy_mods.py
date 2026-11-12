@@ -46,6 +46,12 @@ class LegacyModIntegration(unittest.TestCase):
         guards = mock.patch.object(legacy_clock, 'GUARDS', {0x48: MOVZ_X0 | 0x20})
         guards.start()
         self.addCleanup(guards.stop)
+        # This original miniature NSO contains no projection methods. Keep its
+        # profile local to this test rather than bypassing production guards.
+        for attribute, value in [('PROJECTION_FUNCTIONS', ()), ('PROJECTION_SITES', {})]:
+            projection = mock.patch.object(legacy_sdk7, attribute, value)
+            projection.start()
+            self.addCleanup(projection.stop)
         self.write_patch(0x140, struct.pack('<I', MOVZ_X0 | (42 << 5)))
 
     def write_patch(self, offset, content):

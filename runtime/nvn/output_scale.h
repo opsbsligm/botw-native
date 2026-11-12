@@ -18,6 +18,12 @@ void output_scale_screen(double sw, double sh, int iw, int ih, OutScale *o);
 // The upscaler (Video > Upscaler): whether this build has it (UPSCALE_*), a quality mode's factor (UPQ_*: render size
 // = window / factor per axis), and the factor in use (1: Off)
 bool upscaler_available(int u);
+// These require matching projection hooks in the loaded game library. SDK7
+// keeps wide/temporal modes disabled until its UI/event contexts are ported.
+bool output_projection_available(void);
+bool output_fov_available(void);
+bool output_wide_available(void);
+bool antialias_available(int mode);
 bool fsr3_upscaler_enabled(void);  // FSR 3 upscaling offered (held back for now; SAVAGEWIND_FSR3=1)
 // The world camera's projection as last made (rt_persp, game thread): tan(fovy / 2), aspect, near, far; zeros before
 void rt_world_projection(float out[4]);
