@@ -88,6 +88,11 @@ void control_bar_draw(float) {
             nd_ui_label(t("Anisotropic filtering","各向异性过滤"));
             {static const char *anames[]={t("Off (game)","关（游戏自带）"),t("2x","2 倍"),t("4x","4 倍"),t("8x","8 倍"),t("16x","16 倍")};
              dirty|=nd_ui_choice("##aniso",&g_settings.anisotropy,anames,5);}
+            nd_ui_label(t("Texture memory (HD mods)","贴图显存上限（HD 贴图 mod）"));
+            {static const int poolmib[]={0,512,1024,2048,4096,8192};static const char *pn2[]={t("Game default","游戏默认"),t("512 MiB","512 MiB"),t("1 GiB","1 GiB"),t("2 GiB","2 GiB"),t("4 GiB","4 GiB"),t("8 GiB","8 GiB")};
+             int pi=0;for(int i=0;i<6;i++) if(g_settings.tex_pool_mib==poolmib[i]) pi=i;
+             if(nd_ui_choice("##texpool",&pi,pn2,6)) {g_settings.tex_pool_mib=poolmib[pi];dirty=true;}
+             ImGui::TextWrapped("%s",t("Raise it for HD texture mods that outgrow the game's own pool (117 MiB). Takes effect next launch.","为超出游戏自带贴图池（117 MiB）的 HD 贴图 mod 提高上限，下次启动生效。"));}
             nd_ui_label(t("Field of view","视野范围"));
             {static const int fov[]=FOV_CHOICES;static const char *fnames[9];static char fbuf[9][8];
              for(int i=0;i<9;i++){snprintf(fbuf[i],8,"%d%%",fov[i]);fnames[i]=fbuf[i];}

@@ -32,7 +32,9 @@ CA4 三块能力，全部以「玩家数据目录 `mods/`，缺省即无副作�
 
 **备选（若实测 guest 不查 GetSize 而硬编码常数）：** 仅 .ips 改 guest 常数即可生效，host 零改动；此路径下"HD 贴图包必须带配套 .ips"成为约定，写进 `docs/data-folder.md` 的 mods 章节。两条路径以 Deck 实跑验证决定取舍，不预设。
 
-**边界与回退：** `MAX_POOL` 做成控制栏/环境变量可调；`plat_commit` 失败（罕见）时回落到"guest 原大小 + 明确错误日志"。默认 8192 MiB 对 Deck（16 GiB）安全，留 8 GiB 给系统与其他纹理。
+**边界与回退：** 上限做成控制栏项（`tex_pool_mib`，画面页"贴图显存上限"，0=游戏默认/512 MiB..8 GiB）与环境变量 `SAVAGEWIND_MAX_TEXTURE_POOL`（MiB，单次运行覆盖）；`plat_commit` 失败（罕见）时回落到"guest 原大小 + 明确错误日志"。8 GiB 对 Deck（16 GiB）安全，留 8 GiB 给系统与其他纹理。
+
+**Host 侧已落地（2026-11-12，本仓 main 之外的 CA4 实现 MR）：** 核实后 host 对池大小本就**零守卫**——guest 的纹理池经 `nvnMemoryPoolSetStorage` 传入自管内存、`MapVirtual` 整块别名（`runtime/nvn/objects.c`），host 不截断也不报错；guest 侧上限是 guest 自己代码里的常数（.ips 可改）。因此 host 侧落地为：① 上限读取器 `settings_tex_pool_cap()`（settings 字段优先、环境变量覆盖、0=不设限，`runtime/settings.c`）；② `nvnMemoryPoolInitialize` 在池超过上限时打明确日志（HD mod 超池不再静默失败，`runtime/nvn/objects.c`）；③ 控制栏画面页"贴图显存上限"下拉 + 持久化（`tex_pool_mib =` ini 字段）+ 中英繁文案；④ 单测 `tests/test_tex_pool.py`（往返 + 环境变量覆盖 + 缺省无上限）。**尚未改行为**：上限目前只报警不拦截，是否硬性拦截与 guest 常数的 .ips 位置以 Deck 实跑定，不预设。
 
 **验收：** 放一个把主角头像 `.bflt` 换成更高分辨率并带配套 `.ips` 的 mod，Deck 实跑截图确认贴图生效且不 OOM；`/proc`/perf 观察纹理池物理页只涨到实际量；无 mods 时内存曲线与基线一致。
 

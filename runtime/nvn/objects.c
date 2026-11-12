@@ -8,6 +8,7 @@
 #include "../legacy_clock.h"
 #include "../perfmon.h"
 #include "nvn.h"
+#include "../settings.h"
 
 void renderer_sync(void);
 
@@ -399,11 +400,18 @@ NVN(nvnMemoryPoolBuilderGetFlags) { RET(G(uint32_t, A(0), 8)); }
 NVN(nvnMemoryPoolBuilderGetMemory) { RET(G(uint64_t, A(0), 0x10)); }
 NVN(nvnMemoryPoolBuilderGetSize) { RET(G(uint64_t, A(0), 0x18)); }
 
+// CA4 HD texture packs: the guest's texture pool (0x7300000 in 1.8.2) can be outgrown by a mod that swaps a
+// .bflt for a bigger one; the pool cap (settings_tex_pool_cap) is the ceiling the host warns about before the
+// guest's own allocator fails silently.
 NVN(nvnMemoryPoolInitialize) {
     NvnPool *p = calloc(1, sizeof *p);
     p->storage = G(uint64_t, A(1), 0x10);
     p->size = G(uint64_t, A(1), 0x18);
     p->flags = G(uint32_t, A(1), 8);
+    uint64_t cap = settings_tex_pool_cap();
+    if (cap && p->size > cap)
+        LOG("[nvn] memory pool %#llx exceeds the texture pool cap %#llx: an HD mod outgrew the cap\n",
+            (unsigned long long)p->size, (unsigned long long)cap);
     SET_HOST(A(0), p);
     RET(1);
 }
