@@ -16,9 +16,15 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdatomic.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#endif
 
 #include "paths.h"
 #include "log.h"
+#include "ips_patch.h"
 
 // Every snprintf here joins a bounded dir and a <=255-byte name into a PATH_MAX buffer; when the join would
 // overflow, the caller stats/unlinks the result and treats a short path as "not there". GCC's -Wformat-truncation
@@ -287,16 +293,19 @@ static uint8_t *read_whole(const char *path, size_t *len) {
     return p;
 }
 
-// The NSO's sections, file offsets and sizes (the header: 0x10+16*i is file/mem/size of segment i, 0x3C the bss),
+// The NSO's sections: file/memory/decoded size at 0x10/0x14/0x18+16*i; stored compressed sizes at 0x60+4*i.
+// Fingerprints hash stored bytes, never decoded lengths into a compressed file.
 // and its build-id at 0x40 (what runtime/loader.c checks against the layout).
 static bool nso_sections(const uint8_t *raw, size_t len, uint32_t seg[3][3], uint32_t *bss) {
-    if (len < 0x70 || memcmp(raw, "NSO0", 4)) return false;
+    if (len < 0x100 || memcmp(raw, "NSO0", 4)) return false;
+    uint32_t flags; memcpy(&flags, raw + 0x0C, 4);
     for (int i = 0; i < 3; i++) {
-        seg[i][0] = *(uint32_t *)(raw + 0x10 + i * 0x10);
-        seg[i][1] = *(uint32_t *)(raw + 0x18 + i * 0x10);
-        seg[i][2] = *(uint32_t *)(raw + 0x20 + i * 0x10);
+        memcpy(&seg[i][0], raw + 0x10 + i * 0x10, 4);
+        memcpy(&seg[i][1], raw + 0x14 + i * 0x10, 4);
+        memcpy(&seg[i][2], raw + ((flags & (1u << i)) ? 0x60 + i * 4 : 0x18 + i * 0x10), 4);
+        if (seg[i][0] > len || seg[i][2] > len - seg[i][0] || (seg[i][2] && seg[i][0] < 0x100)) return false;
     }
-    *bss = *(uint32_t *)(raw + 0x3C);
+    memcpy(bss, raw + 0x3C, 4);
     return true;
 }
 
@@ -306,11 +315,23 @@ static bool nso_build_id(const uint8_t *raw, size_t len, char *id65) {
     return true;
 }
 
-// One .ips (offsets from the module file's start; a zero source byte keeps the file's byte - the IPS 0xF0 run).
+// Standard IPS/IPS32 writes every byte. The older private IPS\x1a dialect retains its zero-means-keep convention.
 // Returns the number of records applied, -1 a problem (the message in <why>).
 static int apply_ips(const char *ips_path, const char *module, uint8_t *raw, size_t len, char *why, size_t why_size) {
     size_t n;
     uint8_t *ip = read_whole(ips_path, &n);
+    if (ip && n >= 5 && (!memcmp(ip, "PATCH", 5) || !memcmp(ip, "IPS32", 5))) {
+        uint32_t flags = 0;
+        if (len >= 0x100) memcpy(&flags, raw + 0x0C, sizeof flags);
+        if (len < 0x100 || memcmp(raw, "NSO0", 4) || (flags & 7)) {
+            if (why && why_size) snprintf(why, why_size, "%s: standard IPS requires an uncompressed NSO with a full header", module);
+            free(ip); return -1;
+        }
+        char detail[128];
+        int result = sw_ips_apply(ip, n, raw, len, 0x100, detail, sizeof detail);
+        if (result < 0 && why && why_size) snprintf(why, why_size, "%s: %s: %s", module, ips_path, detail);
+        free(ip); return result;
+    }
     if (!ip || n < 4 || memcmp(ip, "IPS\x1a", 4)) {
         if (why && why_size) snprintf(why, why_size, "%s: %s is not an IPS", module, ips_path);
         free(ip);
@@ -452,7 +473,35 @@ static void record_path(const char *extracted, char *out, size_t n) {
     snprintf(out, n, "%s/.mods-patched", extracted);
 }
 
+static bool mods_write_atomic(const char *path, const void *bytes, size_t length) {
+    static _Atomic unsigned serial;
+    char pending[1400];
+    int n = snprintf(pending, sizeof pending, "%s.mods-%ld-%u.tmp", path, (long)getpid(), atomic_fetch_add(&serial, 1));
+    if (n < 0 || n >= (int)sizeof pending) return false;
+    FILE *f = fopen(pending, "wbx");
+    if (!f) return false;
+    bool ok = !length || fwrite(bytes, 1, length, f) == length;
+    if (fflush(f)) ok = false;
+#ifdef _WIN32
+    if (_commit(_fileno(f))) ok = false;
+#else
+    if (fsync(fileno(f))) ok = false;
+#endif
+    if (fclose(f)) ok = false;
+    if (ok) {
+#ifdef _WIN32
+        ok = MoveFileExA(pending, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        ok = rename(pending, path) == 0;
+#endif
+    }
+    if (!ok) remove(pending);
+    return ok;
+}
+
 int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *record, size_t record_size) {
+    if (why && why_size) why[0] = 0;
+    if (record && record_size) record[0] = 0;
     static char mods[1024];
     snprintf(mods, sizeof mods, "%s", mods_dir());
     char rec[1024];
@@ -486,13 +535,13 @@ int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *re
             if (!raw) {
                 if (why && why_size) snprintf(why, why_size, "%s: the %s module isn't in the game's exefs",
                                               entry[i].name, modname);
-                continue;
+                goto failed;
             }
             uint32_t seg[3][3], bss;
             if (!nso_sections(raw, len, seg, &bss)) {
                 if (why && why_size) snprintf(why, why_size, "%s: %s isn't an NSO module", entry[i].name, modname);
                 free(raw);
-                continue;
+                goto failed;
             }
             char id_before[65], id_after[65];
             nso_build_id(raw, len, id_before);
@@ -503,7 +552,7 @@ int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *re
             if (c < 0) {
                 if (why && why_size) snprintf(why, why_size, "%s: %s", entry[i].name, pw);
                 free(raw);
-                continue;
+                goto failed;
             }
             if (!c) {
                 free(raw);
@@ -514,35 +563,36 @@ int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *re
                 if (why && why_size) snprintf(why, why_size, "%s: %s changed the module's build id", entry[i].name,
                                               ips[k].name);
                 free(raw);
-                continue;
+                goto failed;
             }
-            FILE *f = fopen(mp, "r+b");
-            if (!f || fwrite(raw, 1, len, f) != len) {
+            if (!mods_write_atomic(mp, raw, len)) {
                 if (why && why_size) snprintf(why, why_size, "%s: %s couldn't be written", entry[i].name, modname);
-                if (f) fclose(f);
                 free(raw);
-                continue;
+                goto failed;
             }
-            fclose(f);
             free(raw);
-            patched = realloc(patched, plen + 256);
+            char *next = realloc(patched, plen + 256);
+            if (!next) {
+                if (why && why_size) snprintf(why, why_size, "Not enough memory to record applied patches");
+                goto failed;
+            }
+            patched = next;
             plen += (size_t)snprintf(patched + plen, 256, "%s x%d\n", modname, c);
             LOG("[mods] exefs %s: %s, %d record%s\n", entry[i].name, ips[k].name, c, c > 1 ? "s" : "");
         }
     }
     // the note (what was applied, once): no fingerprint yet - the game code is not built with this, still (that
     // is what mods_mark_built writes, the fingerprint of the exefs as it stands now)
-    FILE *f = fopen(rec, "w");
-    if (f) {
-        if (plen) fwrite(patched, 1, plen, f);
-        fclose(f);
+    if (!mods_write_atomic(rec, patched, plen)) {
+        if (why && why_size) snprintf(why, why_size, "Could not publish the applied-patches record");
+        goto failed;
     }
     free(patched);
     if (record && record_size) snprintf(record, record_size, "%s", rec);
     if (why && why_size) why[0] = 0;
     // the number of modules left patched (the note's lines)
     int n = 0;
-    f = fopen(rec, "r");
+    FILE *f = fopen(rec, "r");
     if (f) {
         char line[512];
         while (fgets(line, sizeof line, f))
@@ -550,6 +600,10 @@ int mods_exefs_apply(const char *extracted, char *why, size_t why_size, char *re
         fclose(f);
     }
     return n;
+failed:
+    free(patched);
+    remove(rec);  // Never preserve a previous successful rebuild claim after a rejected patch.
+    return -1;
 }
 
 // The note read back: "" when there is none or nothing in it.

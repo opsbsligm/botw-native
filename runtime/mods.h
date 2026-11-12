@@ -8,10 +8,10 @@
 //                (SAVAGEWIND_ROMFS_OVERLAY, runtime/services/fs.c) already does: the mods are merged into one view
 //                (<extracted>/.mods-view) and that view is what the overlay reads, so fs.c itself is unchanged.
 //
-//   ExeFS patches - a mod's <module>.ips files patch the game's NSO modules the way Atmosphere patches a loaded
-//                file: the offset is from the start of the module file, a zero source byte keeps the file's byte
-//                (the IPS 0xF0 run). Applied in the game's copied exefs after the copy and before the game code is
-//                built, so the build lifts the new bytes and the build-id check still matches.
+//   ExeFS patches - a mod's <module>.ips files patch the copied NSO before code generation. Standard IPS/IPS32
+//                supports literal zero bytes and RLE, requires an uncompressed module, and protects its 0x100-byte
+//                header. Every record is validated before modification. The older private IPS\x1a dialect keeps
+//                its legacy zero-means-keep convention. Build-id filenames and PCHTXT are not supported here.
 //
 // Because a patch can change code, with a non-empty mods/ the start screen always offers to rebuild the game code
 // (mods_need_rebuild), and a successful rebuild marks the mods applied (mods_mark_built) - so a plain start

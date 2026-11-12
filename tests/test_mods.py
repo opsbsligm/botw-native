@@ -6,22 +6,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def nso(build_id=b"\x11" * 32, text=b"\x90" * 64, ro=b"\x41" * 16, data=b"\x00" * 8):
     # a minimal NSO: header, three segments (file/mem/size at 0x10+16*i), bss at 0x3C, the build id at 0x40
-    out = bytearray(0x70 + len(text) + len(ro) + len(data))
+    out = bytearray(0x100 + len(text) + len(ro) + len(data))
     out[0:4] = b"NSO0"
-    off = 0x70
+    off = 0x100
     segs = []
     for chunk in (text, ro, data):
         segs.append((off, 0x1000000 + off, len(chunk)))
         out[off:off + len(chunk)] = chunk
         off += len(chunk)
     for i, (f, m, s) in enumerate(segs):
-        struct.pack_into("<6I", out, 0x10 + 16 * i, f, m, s, 0, 0, 0)
+        struct.pack_into("<3I", out, 0x10 + 16 * i, f, m, s)
+        struct.pack_into("<I", out, 0x60 + i * 4, s)
     struct.pack_into("<I", out, 0x3C, 0)
     out[0x40:0x60] = build_id
     return bytes(out)
 
 
-def ips_bytes(data, offset=0x70):
+def ips_bytes(data, offset=0x100):
     return (b"IPS\x1a" + struct.pack(">I", offset)[1:] + struct.pack(">I", len(data))[1:] + data + b"\x00\x00\x00\x00")
 
 
@@ -81,7 +82,7 @@ int main(int argc, char **argv) {
     assert(n == 1);
     FILE *m = fopen("extracted/exefs/main", "rb");
     unsigned char got[8];
-    fseek(m, 0x70, SEEK_SET);
+    fseek(m, 0x100, SEEK_SET);
     assert(fread(got, 1, 8, m) == 8);
     fclose(m);
     assert(got[0] == 1 && got[1] == 2 && got[2] == 0x90 && got[3] == 4);
