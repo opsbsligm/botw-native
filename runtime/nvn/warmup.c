@@ -44,12 +44,11 @@ static _Atomic bool g_started;
 static void *worker(void *arg) {
     (void)arg;
     uint64_t gen = atomic_load(&sw_renderer_generation);  // (a reboot in the middle: its caches are not ours)
-    char romfs[1100];
-    snprintf(romfs, sizeof romfs, "%s/romfs", g_romfs_dir ? g_romfs_dir : "");
     if (atomic_load(&sw_renderer_generation) != gen) { if (atomic_load(&g_run_gen) == gen) g_running = false; return 0; }
     maxwell_gmem_base = HEAP_BASE;   // (as the game translates: global memory relative to the guest heap)
     maxwell_gmem_size = HEAP_MAX;
-    bool ok = shader_precompile_run(&g_pc, romfs);
+    // g_romfs_dir is the romfs folder itself (main.c boot: <root>/romfs): pass it, not a /romfs on it
+    bool ok = shader_precompile_run(&g_pc, g_romfs_dir ? g_romfs_dir : "");
     if (atomic_load(&sw_renderer_generation) != gen) { if (atomic_load(&g_run_gen) == gen) g_running = false; return 0; }  // (a reboot mid-run: drop its flag so the next boot can start again)
     if (atomic_load(&g_run_gen) == gen) g_running = false;  // (cleared in every path, before the share below: the share
     // is the signal that this run is over, and frame() keys its next start on the flag being down)

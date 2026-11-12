@@ -2,6 +2,15 @@
 
 What changed in each Savage Wind release. The `test` branch holds what the next one will contain.
 
+## Deck runtime hotfix (Linux) - 2026-11-12
+
+**The in-play shader warm-up ran against a missing folder.** On the 2026-11-12 Deck
+release the warm-up logged `cannot read .../romfs/romfs: no game data folder` and
+never ran: the worker appended a second `romfs` to a path that already ended in one.
+The background precompilation now points at the game's RomFS directly, and the
+warm-up's test records the path the engine receives so a doubled one fails in CI.
+The boot's pipeline pre-warm and the game itself are unchanged.
+
 ## Alpha 3 hotfix (0.3.1-alpha.3, Windows) - 2026-10-25
 
 **For AMD and Intel graphics on Windows.** Since Alpha 3, AMD's and Intel's Windows drivers showed only a black window,

@@ -21,6 +21,7 @@ void SDL_Delay(Uint32 ms) {  // (a real block: the no-op stub turns the poll loo
 }
 static _Atomic int test_status;
 static _Atomic int test_calls, test_running, test_release, test_parking;
+static char test_romfs[1100];  // (the romfs path the engine received: the worker must pass g_romfs_dir itself)
 int shader_precompile_status(int *shaders, char *date, int n) { (void)shaders; (void)date; (void)n; return atomic_load(&test_status); }
 bool shader_precompile_available(void) { return true; }
 float shader_precompile_progress(const ShaderPrecompile *p) {
@@ -29,7 +30,7 @@ float shader_precompile_progress(const ShaderPrecompile *p) {
     return t > 0 ? (float)d / (float)t : 0;
 }
 bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
-    (void)romfs;
+    snprintf(test_romfs, sizeof test_romfs, "%s", romfs);
     atomic_fetch_add(&test_calls, 1);
     atomic_store(&test_running, 1);
     atomic_store(&p->state, SP_COMPILING);
@@ -73,6 +74,9 @@ int main(int argc, char **argv) {
     assert(sw_warmup_available());
     sw_warmup_frame();
     wait_calls(1);
+    // 1b. the engine receives the romfs folder itself (main.c sets g_romfs_dir to <root>/romfs): a second
+    // /romfs on it makes the scan open a missing folder ("no game data folder")
+    assert(strcmp(test_romfs, g_romfs_dir) == 0);
     wait_running(1);
     atomic_store(&test_release, 1);
     wait_done();
