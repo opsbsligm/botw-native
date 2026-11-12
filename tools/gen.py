@@ -68,7 +68,7 @@ def sanitize(sym):
 class Module:
     def __init__(self, name, path, base, simd='asm'):
         self.name = name
-        self.nso = Nso(path)
+        self.nso = path if isinstance(path, Nso) else Nso(path)
         self.base = base
         n = self.nso
         self.lo = base + n.text[0]
@@ -611,7 +611,9 @@ def main_sites(nso, base, opts):
         from legacy_sdk7 import verify_main
         path = os.path.join(opts.input, 'main') if opts.name in ('layout', 'all') else opts.input
         try:
-            return verify_main(path, base, nso.build_id)
+            context = getattr(opts, '_mod_context', None)
+            return verify_main(path, base, nso.build_id,
+                               raw=context.originals['main'] if context is not None else None)
         except ValueError as exc:
             raise game_sites.SiteError(str(exc)) from exc
     if opts.no_sites:
@@ -724,6 +726,7 @@ def main():
     ap.add_argument('--big-fn', type=int, default=100000)  # bytes of C from which a function gets its own file
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('--legacy-sdk7', action='store_true', help='exact local 1.6.0 profile; original pacing/menus')
+    ap.add_argument('--code-mods', help='Linux SDK7 all: snapshot mods/<name>/exefs/*.ips, *.ips32, *.pchtxt before AOT')
     ap.add_argument('--any-version', action='store_true')  # (a main module of a version not supported yet)
     ap.add_argument('--no-sites', action='store_true')  # (made-up modules, tools/test_layout.py: no sites, no patches)
     ap.add_argument('--simd', choices=('asm', 'c'),
@@ -731,14 +734,23 @@ def main():
     args = ap.parse_args()
     if args.legacy_sdk7 and (args.no_sites or args.any_version):
         ap.error('--legacy-sdk7 cannot be combined with --no-sites or --any-version')
+    if args.code_mods and (not args.legacy_sdk7 or args.name != 'all'):
+        ap.error('--code-mods requires all and --legacy-sdk7; never bypass the original input profile')
+    if args.code_mods and sys.platform != 'linux':
+        ap.error('--code-mods requires the isolated Linux build toolchain')
     if len(args.paths) != (1 if args.name in ('layout', 'all') else 2):
         ap.error('wrong number of arguments')
 
     try:
         if args.name in ('layout', 'all'):
             exefs, outdir = args.input, args.paths[0]
-            lay = layout.checked(exefs)
-            if args.legacy_sdk7:
+            args._mod_context = None
+            if args.code_mods:
+                from legacy_mods import prepare
+                args._mod_context = prepare(exefs, args.code_mods)
+            snapshots = args._mod_context.prepared.modules if args._mod_context is not None else None
+            lay = layout.checked(exefs, snapshots)
+            if args.legacy_sdk7 and args._mod_context is None:
                 from legacy_sdk7 import verify_exefs
                 try:
                     verify_exefs(exefs, [m[0] for m in lay])
@@ -746,10 +758,14 @@ def main():
                     raise layout.LayoutError(str(exc)) from exc
             layout.show(lay)
             main_base = next(b for n, b, *_ in lay if n == 'main')
-            version, sites = main_sites(Nso(os.path.join(exefs, 'main')), main_base, args)
+            version, sites = main_sites(Nso(os.path.join(exefs, 'main'),
+                raw=snapshots['main'] if snapshots is not None else None), main_base, args)
             print(f'  game version {version}, {len(sites)} sites')
             layout.write(lay, outdir, (version, sites))
             if args.name == 'all':
+                from pathlib import Path
+                from legacy_mods import RECORD
+                (Path(outdir) / RECORD).unlink(missing_ok=True)
                 present = {n for n, *_ in lay}
                 for n in layout.LOAD_ORDER:  # a module gone from the exefs: its old C would still be built in
                     if n not in present and os.path.isdir(os.path.join(outdir, n)):
@@ -757,8 +773,13 @@ def main():
                 hle = args.hle
                 for n, base, size, build_id in lay:
                     args.hle = hle if n != 'main' else None
-                    generate(n, os.path.join(exefs, n), base, os.path.join(outdir, n), args,
+                    source = Nso(n, raw=snapshots[n]) if snapshots is not None else os.path.join(exefs, n)
+                    generate(n, source, base, os.path.join(outdir, n), args,
                              sites if n == 'main' else None)
+                if args._mod_context is not None:
+                    from legacy_mods import publish_context
+                    record = publish_context(args._mod_context, outdir)
+                    print('Static mods entered AOT: ' + ', '.join(record['changed_modules']), file=sys.stderr)
             return
         lay = {n: (b, i) for n, b, s, i in layout.read(args.paths[0])}
         if args.name not in lay:
@@ -767,7 +788,7 @@ def main():
         if header(args.input)['build_id'] != build_id:
             raise layout.LayoutError(f'{args.input} is not the {args.name} that {args.paths[0]} was made from')
         generate(args.name, args.input, base, args.paths[1], args)
-    except (layout.LayoutError, game_sites.SiteError) as e:
+    except (layout.LayoutError, game_sites.SiteError, ValueError) as e:
         sys.exit(f'gen.py: {e}')
 
 

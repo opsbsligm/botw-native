@@ -75,3 +75,7 @@ Launch without the override, or change the path in your wrapper. In a PowerShell
 This only changes which folder the next launch uses: saves and settings are not synchronized between folders.
 If you want to keep newer progress when switching back, close the game and copy it back first, keeping a backup
 of the destination's saves.
+
+## Linux 静态代码 Mod
+
+私有便携包使用独立构建入口与严格版本门禁，目录、支持格式、重新编译及移除回滚见 [Mods 兼容范围与构建](mods.md)。贴图池阈值只是告警，不扩大 guest 堆。
