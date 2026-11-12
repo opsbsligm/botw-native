@@ -26,6 +26,7 @@
 
 #include "../../kernel.h"
 #include "../precompile.h"
+#include "../precompile_record.h"
 #include "../shader_archive.h"
 #include "shaders.h"
 #include "vk.h"
@@ -219,25 +220,37 @@ static void add_job(Jobs *J, int shader, const ShaderKey *k) {
 
 static void status_path(char *out, size_t n) { vk_cache_path(out, n, "precompiled.txt"); }
 
-// cache/precompiled.txt: the shader version (vk_shader_version), then "<shaders> <YYYY-MM-DD>"
+// SWPC2 binds completion to the requested translation and pipeline task counts.
+// Legacy records never recorded failures and therefore cannot prove completion.
 int shader_precompile_status(int *shaders, char *date, int n) {
-    char path[512], version[128] = "", day[32] = "";
-    int count = 0;
+    char path[512];
+    SwPrecompileRecord record;
+    if (shaders) *shaders = 0;
+    if (date && n > 0) date[0] = 0;
     status_path(path, sizeof path);
     FILE *f = fopen(path, "r");
     if (!f) return 0;
-    if (!fgets(version, sizeof version, f) || fscanf(f, "%d %31s", &count, day) != 2) version[0] = 0;
+    bool complete = sw_precompile_record_read(f, &record);
     fclose(f);
-    version[strcspn(version, "\r\n")] = 0;
-    if (!version[0]) return 0;
-    if (shaders) *shaders = count;
-    if (date && n > 0) snprintf(date, (size_t)n, "%s", day);
+    if (!complete) return 2;
+    if (shaders) *shaders = record.shaders;
+    if (date && n > 0) snprintf(date, (size_t)n, "%s", record.date);
     // (the shaders' libraries go with the GPU and driver: a new driver drops them)
-    return strcmp(version, vk_shader_version()) || !vk_precompiled_cache_ok() ? 2 : 1;
+    return strcmp(record.version, vk_shader_version()) || !vk_precompiled_cache_ok() ? 2 : 1;
 }
 
 bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
     uint64_t t0 = SDL_GetTicksNS();
+    char path[512];
+    status_path(path, sizeof path);
+    p->shaders = p->keys = p->made = p->cached = p->failed = p->pipelines = 0;
+    p->why[0] = 0;
+    // A new attempt cannot inherit an earlier run's completion claim.
+    if (remove(path) && errno != ENOENT) {
+        snprintf(p->why, sizeof p->why, "Could not invalidate the previous shader warm-up record; cached work retained.");
+        atomic_store(&p->state, SP_FAILED);
+        return false;
+    }
     atomic_store(&p->done, 0);
     atomic_store(&p->total, 1000);
     atomic_store(&p->state, SP_READING);
@@ -309,6 +322,8 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
         set.nsources, (unsigned long long)set.files, set.bytes / 1048576.0, (SDL_GetTicksNS() - t0) / 1e9, njobs);
     // translate and compile them
     Work w = {.p = p, .set = &set, .jobs = jobs, .njobs = njobs};
+    bool pipelines_checked = false;
+    bool cache_saved = false;
     atomic_store(&p->done, 0);
     atomic_store(&p->total, njobs);
     atomic_store(&p->state, SP_COMPILING);
@@ -329,6 +344,7 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
     // draw with other blending, target formats or write masks costs the driver much of a compile again.
     bool graphics = !g_vk.gpl && getenv("SAVAGEWIND_PRECOMPILE_PIPELINES") != NULL;
     if (g_vk.dev && !atomic_load(&p->cancel) && !getenv("SAVAGEWIND_PRECOMPILE_NO_PIPELINES")) {
+        pipelines_checked = true;
         int *first = malloc(sizeof *first * (size_t)(set.nshaders ? set.nshaders : 1));  // shader -> its predicted job
         for (int i = 0; i < set.nshaders; i++) first[i] = -1;
         for (int i = 0; i < njobs; i++)
@@ -377,7 +393,7 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
         p->pipelines = atomic_load(&w.built);
         extern void vk_pipeline_cache_save(void);
         vk_pipeline_cache_save();
-        if (g_vk.gpl) vk_precompiled_cache_save();
+        cache_saved = !g_vk.gpl || vk_precompiled_cache_save();
         LOG("[precompile] %d %s: %d built in %.1f s\n", nu, g_vk.gpl ? "shaders and compute programs (pipeline libraries)" : "programs",
             p->pipelines, (SDL_GetTicksNS() - tp) / 1e9);
         free(pairs);
@@ -399,15 +415,26 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
         return false;
     }
     p->seconds = (SDL_GetTicksNS() - t0) / 1e9;
-    char path[512];
-    status_path(path, sizeof path);
-    FILE *f = fopen(path, "w");
-    if (f) {
-        time_t now = time(NULL);
-        char date[32];
-        strftime(date, sizeof date, "%Y-%m-%d", localtime(&now));
-        fprintf(f, "%s\n%d %s\n", vk_shader_version(), p->shaders, date);
-        fclose(f);
+    SwPrecompileRecord record = {.shaders = p->shaders, .translations = p->keys,
+        .made = p->made, .cached = p->cached, .failed = p->failed,
+        .pipelines_requested = w.npairs, .pipelines_built = p->pipelines,
+        .pipelines_checked = pipelines_checked};
+    if (p->failed || !sw_precompile_record_complete(&record) || !cache_saved) {
+        remove(path);  // Keep the compiled caches, never a previous completion claim.
+        snprintf(p->why, sizeof p->why, "%d shader translations failed; %d/%d pipelines built%s%s. Cached work retained for retry.",
+                 p->failed, p->pipelines, w.npairs, pipelines_checked ? "" : " (pipeline warm-up skipped)",
+                 pipelines_checked && !cache_saved ? " (pipeline cache not saved)" : "");
+        atomic_store(&p->state, SP_FAILED);
+        return false;
+    }
+    snprintf(record.version, sizeof record.version, "%s", vk_shader_version());
+    time_t now = time(NULL);
+    strftime(record.date, sizeof record.date, "%Y-%m-%d", localtime(&now));
+    if (!sw_precompile_record_write(path, &record, (unsigned long long)SDL_GetTicksNS())) {
+        remove(path);
+        snprintf(p->why, sizeof p->why, "Could not publish shader warm-up completion record; cached work retained for retry.");
+        atomic_store(&p->state, SP_FAILED);
+        return false;
     }
     atomic_store(&p->state, SP_DONE);
     return true;
