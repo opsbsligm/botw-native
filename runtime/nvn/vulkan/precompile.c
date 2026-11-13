@@ -49,7 +49,7 @@ typedef struct {
     int njobs;
     Pair *pairs;
     int npairs;
-    _Atomic int next, made, cached, failed, built;
+    _Atomic int next, made, cached, failed, built, pipeline_failed;
     // the pipelines step: the driver's compiles share a memory budget (pipe_take)
     int *order;                   // pairs, largest shader first
     int64_t *need_mb;             // per pair: what its compile is estimated to take
@@ -147,6 +147,14 @@ static void *pipe_worker(void *arg) {
             maxwell_free(fi);
         }
         if (ok) atomic_fetch_add(&w->built, 1);
+        else if (atomic_fetch_add(&w->pipeline_failed, 1) < 40) {
+            const int ids[] = {pr->vs, pr->fs, pr->cs};
+            uint64_t hashes[3] = {0};
+            for (int k = 0; k < 3; k++)
+                if (ids[k] >= 0) hashes[k] = w->set->shaders[w->jobs[ids[k]].shader].hash;
+            LOG("[precompile] pipeline task failed: vertex %016llx fragment %016llx compute %016llx\n",
+                (unsigned long long)hashes[0], (unsigned long long)hashes[1], (unsigned long long)hashes[2]);
+        }
 #ifdef __GLIBC__
         if (mb >= 128) malloc_trim(0);
 #endif
