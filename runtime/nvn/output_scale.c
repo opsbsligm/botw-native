@@ -18,9 +18,11 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "../framepace.h"
+#include "../gamelib.h"
 #include "../hle.h"
 #include "../platform.h"
 #include "../settings.h"
@@ -28,6 +30,44 @@
 
 #define MAX_TEX 16384.0
 #define SCENE_LINES 900.0  // the height of the game's 3D scene targets (docked)
+
+extern bool gamelib_legacy_sdk7_profile(void);
+
+bool output_projection_available(void) {
+    const GameLibTables *t = gamelib_tables();
+    if (!t || !t->nsites || !t->sites || !t->modules || !t->nmodules || !*t->nmodules) return false;
+    static const char *const required[] = {"persp_matrix", "persp_matrix_offset", "persp_unproject_x",
+        "persp_unproject_y", "proj_update", "frustum_lr0", "frustum_lr1", "frustum_tb0", "frustum_tb1"};
+    const GameLibModule *main = &t->modules[0];
+    for (unsigned i = 0; i < sizeof required / sizeof required[0]; i++) {
+        uint32_t k = 0;
+        while (k < *t->nsites && strcmp(required[i], t->sites[k].name)) k++;
+        if (k == *t->nsites || t->sites[k].addr < main->base ||
+            t->sites[k].addr - main->base >= main->size) return false;
+    }
+    return true;
+}
+
+bool output_fov_available(void) {
+    if (!output_projection_available()) return false;
+    // SDK7's projection hooks are independently guarded. Event/cutscene
+    // detection is not ported, so opt in only for isolated validation for now.
+    const char *test = getenv("SAVAGEWIND_SDK7_FOV");
+    return !gamelib_legacy_sdk7_profile() || (test && !strcmp(test, "1"));
+}
+
+bool output_wide_available(void) {
+    return output_projection_available() && !gamelib_legacy_sdk7_profile();
+}
+
+bool antialias_available(int mode) {
+    if (mode == AA_OFF || mode == AA_SMAA) return true;
+#ifdef __APPLE__
+    return false;
+#else
+    return mode == AA_TAA && output_wide_available();
+#endif
+}
 
 #ifndef __APPLE__
 bool fsr3_available(void);  // (vulkan/fsr3.h: built in)
@@ -45,7 +85,8 @@ bool upscaler_available(int u) {
 #ifdef __APPLE__
     return u == UPSCALE_OFF || u == UPSCALE_METALFX;
 #else
-    return u == UPSCALE_OFF || u == UPSCALE_FSR1 || (u == UPSCALE_FSR3 && fsr3_available() && fsr3_upscaler_enabled());
+    return u == UPSCALE_OFF || u == UPSCALE_FSR1 || (u == UPSCALE_FSR3 && output_wide_available() &&
+                                                   fsr3_available() && fsr3_upscaler_enabled());
 #endif
 }
 
@@ -78,7 +119,9 @@ double upscale_factor(void) {
 
 // The window's shape over 16:9 while the game's views are widened to fill it, else 1; the field of view's factor in
 // use (rt_persp)
-static volatile float g_view_shape = 1, g_fov = 1;
+// Renderer publishes these to guest projection calls on the game threads.
+// Volatile alone does not synchronize concurrent C accesses.
+static _Atomic float g_view_shape = 1, g_fov = 1;
 static uint32_t g_world_proj[4];  // tan(fovy / 2), aspect, near, far of the world camera's last matrix (rt_persp), float bits
 
 void output_scale(double dw, double dh, bool reshape_allowed, OutScale *o) {
@@ -91,7 +134,8 @@ void output_scale(double dw, double dh, bool reshape_allowed, OutScale *o) {
     // (#125); the HUD keeps its 16:9 layout in the middle either way. The start screen and its menus, a 16:9 layout
     // over 16:9 pictures with no world to show more of, keep the 16:9 picture with bars, and so does the loading screen
     // (#98: widened, its tip went to the window's edges and its logo stayed in the 16:9 middle).
-    bool reshape = reshape_allowed && fabs(shape - 1.0) > 0.005 && !framepace_title_ui() && !framepace_loading_ui();
+    bool reshape = reshape_allowed && output_wide_available() && fabs(shape - 1.0) > 0.005 &&
+                   !framepace_title_ui() && !framepace_loading_ui();
     if (!reshape) shape = 1.0;
     // render height in units of the Switch's 1080 lines: the window's (Metal: divided by the upscaler's factor)
 #ifdef __APPLE__
@@ -114,7 +158,7 @@ void output_scale(double dw, double dh, bool reshape_allowed, OutScale *o) {
     // where the image goes in the window: fills it when reshaped, else a fitted 16:9 box
     if (reshape) { o->vw = dw; o->vh = dh; }
     else { o->vw = 1920.0 * fit; o->vh = 1080.0 * fit; }
-    if (wide_test > 0) {
+    if (wide_test > 0 && output_wide_available()) {
         double f2 = fmin(dw / (1920.0 * wide_test), dh / 1080.0);
         o->vw = 1920.0 * wide_test * f2; o->vh = 1080.0 * f2;
     }
@@ -136,7 +180,7 @@ void output_scale(double dw, double dh, bool reshape_allowed, OutScale *o) {
     // Video > Field of view: in play only (cutscenes and talks keep the game's framing), eased over about 1/4 s so
     // that a talk's start and end don't jump
     bool event = framepace_in_event();
-    float want = event ? 1.0f : g_settings.fov / 100.0f;
+    float want = event || !output_fov_available() ? 1.0f : g_settings.fov / 100.0f;
     static float logged = -1;
     static int log = -1;
     if (log < 0) log = getenv("SAVAGEWIND_LOG_PROJ") != NULL;
@@ -296,6 +340,7 @@ void rt_jitter_set_size(uint32_t w, uint32_t h) {
 }
 
 bool rt_jitter_on(void) {
+    if (!antialias_available(AA_TAA)) return false;
     static int env = -2;
     if (env == -2) env = getenv("SAVAGEWIND_JITTER") ? atoi(getenv("SAVAGEWIND_JITTER")) != 0 : -1;
     return env >= 0 ? env : rt_temporal();
@@ -326,7 +371,7 @@ int rt_antialias(void) {
     uint64_t frame = n ? renderer_present_count() : 0;
     for (int i = 0; i < n; i++)
         if (frame >= at[i]) r = mode[i];
-    return r;
+    return antialias_available(r) ? r : AA_SMAA;
 }
 
 static float halton(uint32_t i, uint32_t b) {

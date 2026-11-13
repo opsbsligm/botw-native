@@ -30,6 +30,7 @@ extern "C" {
 #include "../hle.h"
 #include "../settings.h"
 #include "../framepace.h"
+#include "../game_sites.h"
 #include "../color_grade.h"
 #include "../window_size.h"
 extern "C" {
@@ -709,6 +710,7 @@ static void tab_display(void) {
         }
     }
     {   // Fill wide screens (runtime/nvn/output_scale.c rt_persp)
+        if (!output_wide_available()) opt_disable_next();
         bool wv = g_settings.wide_view;
         if (opt_toggle("Fill wide screens", &wv, true,
                        "On a window or screen that isn't 16:9 the game shows more of the world instead of black bars: "
@@ -718,6 +720,7 @@ static void tab_display(void) {
             g_settings.wide_view = wv;
     }
     {   // Field of view (runtime/nvn/output_scale.c rt_persp)
+        if (!output_fov_available()) opt_disable_next();
         static const int fov[] = FOV_CHOICES;
         enum { NV = sizeof fov / sizeof fov[0] };
         static char names_buf[NV][16];
@@ -729,9 +732,10 @@ static void tab_display(void) {
             if (fov[i] == g_settings.fov) cur = i;
             if (fov[i] == 100) def = i;
         }
-        if (opt_choice("Field of view", &cur, names, NV, def,
-                       "How much of the world the camera shows in play: 100% is the game's own. Cutscenes and "
-                       "conversations keep theirs.", false))
+        const char *description = gamelib_legacy_sdk7_profile()
+            ? "SDK7 camera test. Cutscene protection is not yet available. Disabled outside isolated testing."
+            : "How much of the world the camera shows in play: 100% is the game's own. Cutscenes and conversations keep theirs.";
+        if (opt_choice("Field of view", &cur, names, NV, def, description, false))
             g_settings.fov = fov[cur];
     }
     {   // Frame rate (runtime/hle/framepace.c)
@@ -869,7 +873,9 @@ static void tab_display(void) {
                            "edges and blends only along them, so textures stay sharp. Most useful with an upscaler.")) +
             " " + tr("TAA: blends each frame with the ones before it, following the game's motion, so edges stay "
                      "smooth and stop shimmering; slightly softer, use it with Sharpening.");
-        opt_choice("Anti-aliasing", &g_settings.antialias, aa, 3, AA_OFF, d.c_str());
+        const bool available[] = {true, true, antialias_available(AA_TAA)};
+        static int shown = -1;
+        opt_choice_avail("Anti-aliasing", &g_settings.antialias, &shown, aa, available, 3, AA_OFF, d.c_str());
     }
 #endif
 #ifndef __APPLE__

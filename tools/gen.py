@@ -628,7 +628,9 @@ def generate(name, nso, base, outdir, opts, sites=None):
         m.sites = sites if sites is not None else main_sites(m.nso, base, opts)[1]
         m.patches = patches.table(m.sites) if m.sites else {}
         if opts.legacy_sdk7:
+            from legacy_sdk7 import projection_table
             from legacy_clock import table
+            m.patches.update(projection_table(m))
             m.patches.update(table(m))
     starts = m.boundaries()
     hle = {}
