@@ -31,10 +31,13 @@ extern "C" {
 const char *mods_dir(void);
 bool mods_present(void);  // the mods/ folder exists and isn't empty
 
-// Merge the RomFS mods into <extracted>/.mods-view and point SAVAGEWIND_ROMFS_OVERLAY at the view; removes both
+// Linux: community <mod>/romfs/ or legacy root contents are staged under the writable data root's
+// native-mods/romfs-view. Code artifacts are excluded. Directory-FD traversal rejects symlinks/devices;
+// verified owned views are atomically exchanged, without copying game data. A failure returns -1 and stops boot.
+// Other platforms merge the RomFS mods into <extracted>/.mods-view. Point SAVAGEWIND_ROMFS_OVERLAY at the view; removes both
 // when there is nothing to overlay (a development overlay set by the user alone is left untouched). The extracted
-// root is "extracted" in the data root, as it is for the game files. Returns the number of files merged (0: no
-// RomFS mods). Called at the boot before the game files open, and once more before every set up; idempotent.
+// root is "extracted" on the other platforms. Returns the number of files merged (0: no
+// RomFS mods, -1: Linux preparation failure). Called at boot before the game files open; idempotent.
 int mods_romfs_apply(void);
 
 // Apply the mods' .ips to <extracted>/exefs (after the exefs copy, before the game code build). For each mod, the
