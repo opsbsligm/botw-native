@@ -422,7 +422,20 @@ static uint64_t xlate_id(const uint8_t *code, size_t max_size, int stage, const 
 ShaderInfo *vk_xlate_read(const uint8_t *code, size_t max_size, int stage, const ShaderKey *key) {
     XlateHeader hd;
     uint64_t h = xlate_id(code, max_size, stage, key, &hd);
-    return xlate_load(h, &hd, stage);
+    ShaderInfo *si = xlate_load(h, &hd, stage);
+    if (!si) {
+        char hex[2 * sizeof hd.key + 1];
+        const uint8_t *bytes = (const uint8_t *)&hd.key;
+        static const char digits[] = "0123456789abcdef";
+        for (size_t i = 0; i < sizeof hd.key; i++) {
+            hex[2 * i] = digits[bytes[i] >> 4];
+            hex[2 * i + 1] = digits[bytes[i] & 15];
+        }
+        hex[sizeof hex - 1] = 0;
+        LOG("[precompile] translation cache unavailable: id %016llx stage %d binary %u key %s\n",
+            (unsigned long long)h, stage, hd.bin_size, hex);
+    }
+    return si;
 }
 
 // Shader precompilation (precompile.c): the translation and SPIR-V of a shader binary with a key, into the caches
@@ -519,7 +532,9 @@ VkShaderModule vk_module(const uint32_t *spv, size_t nwords) {
     }
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nwords * 4, .pCode = spv};
     VkShaderModule m;
-    bool ok = vkCreateShaderModule(g_vk.dev, &ci, NULL, &m) == VK_SUCCESS;
+    VkResult result = vkCreateShaderModule(g_vk.dev, &ci, NULL, &m);
+    bool ok = result == VK_SUCCESS;
+    if (!ok) LOG("[vk] shader module creation failed: %d (%zu words)\n", result, nwords);
     free(copy);
     return ok ? m : VK_NULL_HANDLE;
 }

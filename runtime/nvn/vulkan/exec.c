@@ -4597,7 +4597,10 @@ bool vk_pso_warm_compute(const ShaderInfo *si, const uint32_t local[3]) {
                                                 .pSpecializationInfo = &spec},
                                       .layout = l};
     VkPipeline p;
-    bool ok = vkCreateComputePipelines(g_vk.dev, g_vk.pcache, 1, &ci, NULL, &p) == VK_SUCCESS;
+    VkResult result = vkCreateComputePipelines(g_vk.dev, g_vk.pcache, 1, &ci, NULL, &p);
+    bool ok = result == VK_SUCCESS;
+    if (!ok) LOG("[precompile] compute pipeline creation failed: %d (local %u,%u,%u)\n",
+                 result, local[0], local[1], local[2]);
     extern void vk_pipeline_cache_note(bool hit);
     if (ok) vk_pipeline_cache_note(false);
     if (ok) vkDestroyPipeline(g_vk.dev, p, NULL);
