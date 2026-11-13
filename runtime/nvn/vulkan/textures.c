@@ -373,6 +373,8 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (depthfmt) usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     else if (format_supports(vf, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (!depthfmt && samples == 1 && !b->astc_bw && format_supports(vf, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VkImageCreateFlags flags = 0;
     if (!depthfmt) flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;  // format views (NVN texture views, raw sRGB views)
     // Square 2D arrays of 6 layers or more are made cube compatible (cube views of them can come). On AMD's own driver
@@ -416,6 +418,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         depthfmt = false;
     }
     b->cube_ok = (ci.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0;
+    b->storage_ok = (ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
     static uint64_t serials;
     b->serial = __atomic_add_fetch(&serials, 1, __ATOMIC_RELAXED);
     b->format = vf;
@@ -1271,6 +1274,39 @@ void vk_block_flush(VkCommandBuffer cb, TexBackend *b) {
 
 // render: attachment view (one level, one layer). Otherwise a sampled view of type want_textype (TEXTYPE_*),
 // with the NVN component swizzle, converting between compatible types the way renderer.m does.
+VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_view, int textype, bool raw32) {
+    TexBackend *b = vk_tex(t, false);  // preserve CPU-provided contents before a partial GPU write
+    if (!has_view) v = NULL;
+    uint32_t fmt = v && (v->setmask & 4) ? v->format : t->format;
+    const FormatInfo *fi = nvn_format_info(fmt);
+    const FormatInfo *basefi = nvn_format_info(t->format);
+    uint32_t level = v && (v->setmask & 1) ? v->base_level : 0;
+    uint32_t layer = v && (v->setmask & 2) ? v->min_layer : 0;
+    bool one = textype == TEXTYPE_1D;
+    VkImageViewType want = one ? VK_IMAGE_VIEW_TYPE_1D : VK_IMAGE_VIEW_TYPE_2D;
+    bool dimension = one ? b->base_type == VK_IMAGE_VIEW_TYPE_1D || b->base_type == VK_IMAGE_VIEW_TYPE_1D_ARRAY
+                         : b->base_type == VK_IMAGE_VIEW_TYPE_2D || b->base_type == VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    VkComponentMapping sw = vk_sample_swizzle(t, v);
+    bool identity = (sw.r == VK_COMPONENT_SWIZZLE_IDENTITY || sw.r == VK_COMPONENT_SWIZZLE_R) &&
+                    (sw.g == VK_COMPONENT_SWIZZLE_IDENTITY || sw.g == VK_COMPONENT_SWIZZLE_G) &&
+                    (sw.b == VK_COMPONENT_SWIZZLE_IDENTITY || sw.b == VK_COMPONENT_SWIZZLE_B) &&
+                    (sw.a == VK_COMPONENT_SWIZZLE_IDENTITY || sw.a == VK_COMPONENT_SWIZZLE_A);
+    // Do not reinterpret depth/compressed/fallback images, apply sampling swizzles, silently clamp views,
+    // or pretend that a dispatch at guest dimensions covers a larger scaled allocation.
+    if (!b->storage_ok || b->aspect != VK_IMAGE_ASPECT_COLOR_BIT || b->samples != 1 || !dimension || !identity ||
+        b->sx != 1 || b->sy != 1 || vk_format(t->format) != b->format || !fi || !basefi ||
+        fi->bw != 1 || fi->bh != 1 || fi->bpb != basefi->bpb ||
+        level >= b->levels || layer >= b->layers || (raw32 && fi->bpb != 4) ||
+        (v && (v->setmask & 1) && v->num_levels > 1) || (v && (v->setmask & 2) && v->num_layers > 1) ||
+        (v && (v->setmask & 32) && v->target != t->target))
+        return VK_NULL_HANDLE;
+    VkFormat vf = raw32 ? VK_FORMAT_R32_UINT : vk_format(fmt);
+    if (!format_supports(vf, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) return VK_NULL_HANDLE;
+    const VkComponentMapping id = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                   VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    return vk_image_view(b, want, vf, level, 1, layer, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
 VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool render, int want_textype) {
     TexBackend *b = vk_tex(t, render);
     if (!has_view) v = NULL;

@@ -42,6 +42,7 @@ typedef struct {
     bool custom_border, divisor, host_import, wide_lines;
     bool feat_aniso;  // samplerAnisotropy (Video > Anisotropic filtering)
     bool storage_ext;  // shaderStorageImageExtendedFormats (TAA's R8 / R16F / RG16F storage images: exec.c mvec_taa)
+    bool storage_write_formatless;  // formatted guest image stores select their format through the bound view
     bool depth_clamp;          // depthClamp feature (nvnCommandBufferSetDepthClamp: shadow maps keep occluders before the near plane)
     bool occlusion_precise;    // occlusionQueryPrecise: SAMPLES_PASSED counts samples, not just "any"
     bool feedback_loop;        // attachment feedback loops + barriers inside dynamic rendering (exec.c)
@@ -98,6 +99,7 @@ typedef struct TexBackend {
     uint32_t width, height, depth, layers, levels, samples;
     VkImageAspectFlags aspect;
     bool gpu_owned, uploaded, dynamic;
+    bool storage_ok;         // created with STORAGE usage and a supported uncompressed colour format
     bool slices_renderable;  // 3D image made 2D-array compatible: its slices are render targets
     bool cube_ok;            // made cube compatible: cube and cube-array views allowed
     bool feedback_ok;        // made with VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT (sampled while it is rendered to)
@@ -139,6 +141,7 @@ VkFormat vk_format(uint32_t nvn_format);
 bool vk_format_alpha_one(uint32_t nvn_format);
 // View of t (optionally through an NVN texture view) for rendering or sampling.
 VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool render, int want_textype);
+VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_view, int textype, bool raw32);
 VkComponentMapping vk_sample_swizzle(NvnTexture *t, const NvnTextureView *v);  // (a colour texture's, sampled)
 VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uint32_t lv0, uint32_t nlv, uint32_t ly0,
                           uint32_t nly, VkComponentMapping sw, VkImageAspectFlags aspect);

@@ -65,6 +65,14 @@ typedef struct {
     uint32_t bindless_cbuf, bindless_offset;
 } ShaderTexture;
 
+// Compute storage images use bindings 64..79, separate from sampled textures.
+// The handle is in NVN's image range of the texture constant buffer (0x120).
+typedef struct {
+    uint32_t handle_offset;
+    uint8_t type;
+    bool raw32, write;
+} ShaderImage;
+
 typedef struct {
     int stage;
     char *msl;              // complete MSL or GLSL source (MSL entry "main0", GLSL "main"); NULL on failure
@@ -75,6 +83,8 @@ typedef struct {
     uint32_t cbuf_rows_all;     // cbufs read at an index, or past vec4 255: any of their vec4s may be read
     int ntex;
     ShaderTexture tex[64];
+    int nimages;
+    ShaderImage images[16];
     uint32_t attr_mask;     // vertex: input attributes; fragment: input varyings
     uint32_t out_mask;      // vertex: output varyings; fragment: render targets written
     bool writes_depth, uses_discard, writes_point_size;

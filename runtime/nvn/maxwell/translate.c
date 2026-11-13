@@ -528,6 +528,59 @@ static bool emit_half(Ctx *c, uint64_t w) {
 }
 
 // ------------------------------------------------------------------ textures
+// Immediate surface handles, 1D/2D raw 32-bit reads and formatted RGBA writes.
+// Other forms remain explicit translation failures, including bindless handles.
+static void emit_surface(Ctx *c, uint64_t w, bool store) {
+    bool raw = bits(w, 52, 1);
+    int dim = (int)bits(w, 33, 3), size = (int)bits(w, 20, 4);
+    uint32_t offset = (uint32_t)bits(w, 36, 13) * 4;
+    if (!c->glsl || c->stage != STAGE_COMPUTE || !bits(w, 51, 1) || bits(w, 49, 2) || bits(w, 24, 2) ||
+        (dim != 0 && dim != 3) || (store ? raw || size != 15 : !raw || size != 4) ||
+        offset < 0x120 || (offset - 0x120) % 8 || (offset - 0x120) / 8 >= 8) {
+        fail(c, "unsupported surface %s form %016llx", store ? "store" : "load", (unsigned long long)w);
+        return;
+    }
+    int type = dim == 0 ? TEXTYPE_1D : TEXTYPE_2D;
+    int slot = 0;
+    for (; slot < c->info->nimages; slot++) {
+        ShaderImage *im = &c->info->images[slot];
+        if (im->handle_offset == offset && im->raw32 == raw && im->type == type) break;
+    }
+    if (slot == c->info->nimages) {
+        if (slot == 16) { fail(c, "too many storage image views"); return; }
+        ShaderImage *im = &c->info->images[c->info->nimages++];
+        im->handle_offset = offset;
+        im->type = (uint8_t)type;
+        im->raw32 = raw;
+        im->write = store;
+    }
+    int a = (int)bits(w, 8, 8), d = (int)bits(w, 0, 8);
+    char x[32], y[32], coord[160];
+    const char *rx = reg(c, a, x);
+    const char *ry = reg(c, a + 1 >= RZ ? RZ : a + 1, y);
+    // Raw byte addressing scales x by the access width; negative coordinates stay negative.
+    char sx[80];
+    snprintf(sx, sizeof sx, raw && bits(w, 23, 1) ? "(int(%s) >> 2)" : "int(%s)", rx);
+    if (dim == 0) snprintf(coord, sizeof coord, "%s", sx);
+    else snprintf(coord, sizeof coord, "ivec2(%s, int(%s))", sx, ry);
+    char inside[400];
+    if (dim == 0) snprintf(inside, sizeof inside, "(%s >= 0 && %s < imageSize(im%d))", coord, coord, slot);
+    else snprintf(inside, sizeof inside, "(all(greaterThanEqual(%s, ivec2(0))) && all(lessThan(%s, imageSize(im%d))))",
+                  coord, coord, slot);
+    if (store) {
+        char rb[4][32];
+        const char *value[4];
+        for (int i = 0; i < 4; i++) value[i] = reg(c, d + i >= RZ ? RZ : d + i, rb[i]);
+        sp(&c->body, "    if (%s) imageStore(im%d, %s, vec4(as_f(%s), as_f(%s), as_f(%s), as_f(%s)));\n",
+           inside, slot, coord, value[0], value[1], value[2], value[3]);
+    } else {
+        // Evaluate all coordinates before a destination that aliases its source is written.
+        char value[700];
+        snprintf(value, sizeof value, "%s ? imageLoad(im%d, %s).x : 0u", inside, slot, coord);
+        set_reg(c, d, value);
+    }
+}
+
 static int tex_slot(Ctx *c, uint32_t index, int type, bool shadow, bool array) {
     if (index >= 8192) return 0;
     if (c->tex_slot[index]) {
@@ -852,6 +905,7 @@ static bool writes_gpr(uint64_t w) {
         {0x5d20, 0xfff8}, {0x5090, 0xfff8}, {0x50a0, 0xfff8},  // HSETP2, PSETP, CSETP
         {0x38f0, 0xfef8}, {0x5cf0, 0xfff8}, {0x4cf0, 0xfff8},  // R2P
         {0xeff0, 0xfff8}, {0xeed8, 0xfff8}, {0xef50, 0xfff8}, {0xef58, 0xfff8},  // ST attribute, STG, STL, STS
+        {0xeb20, 0xffe0},  // SUST: its data registers are read
         {0xe300, 0xfff0}, {0xe330, 0xfff0}, {0xe240, 0xfff0}, {0xe250, 0xfff0},  // EXIT, KIL, BRA, BRX
         {0xe290, 0xfff0}, {0xe2a0, 0xfff0}, {0xe2b0, 0xfff0}, {0xe340, 0xfff0}, {0xe350, 0xfff0},  // SSY PBK PCNT BRK CONT
         {0xf0f8, 0xfff8}, {0xf0f0, 0xfff8}, {0x50b0, 0xfff8}, {0xef98, 0xfff8}, {0xf0a8, 0xfff8},  // SYNC DEPBAR NOP MEMBAR BAR
@@ -1225,6 +1279,10 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             if (dyn) c->info->cbuf_size[idx] = 0x10000;
             set_reg(c, d + i, cb);
         }
+    } else if (OPM(0xeb00000000000000ull, 0xffe0000000000000ull)) {  // SULD
+        emit_surface(c, w, false);
+    } else if (OPM(0xeb20000000000000ull, 0xffe0000000000000ull)) {  // SUST
+        emit_surface(c, w, true);
     } else if (OPM(0xd000000000000000ull, 0xf600000000000000ull)) {  // TEXS
         emit_texs(c, w, false);
     } else if (OPM(0xd200000000000000ull, 0xf600000000000000ull)) {  // TLDS
@@ -2223,6 +2281,12 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (c->fail) { free(body.buf); free(pbody.buf); free(c->body.buf); free(c); return info; }
     int set = stage == STAGE_FRAGMENT ? 1 : 0;
     Str s = {0};  // (the prelude goes in front at the end: glsl_with_prelude)
+    for (int i = 0; i < info->nimages; i++) {
+        const ShaderImage *im = &info->images[i];
+        sp(&s, "layout(set = %d, binding = %d%s) uniform %s%simage%s im%d;\n", set, 64 + i,
+           im->raw32 ? ", r32ui" : "", im->write ? "writeonly " : "readonly ", im->raw32 ? "u" : "",
+           im->type == TEXTYPE_1D ? "1D" : "2D", i);
+    }
     for (int i = 0; i < 18; i++) {
         if (!(info->cbuf_mask & (1u << i))) continue;
         uint32_t n = info->cbuf_size[i] / 16;
