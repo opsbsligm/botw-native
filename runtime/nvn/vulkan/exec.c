@@ -4054,6 +4054,34 @@ static VkDescriptorSet set_finish(VkDescriptorSetLayout layout, VkWriteDescripto
     return ds;
 }
 
+static NvnTexEntry *storage_entry(int stage, const ShaderImage *im) {
+    uint32_t offset = im->handle_offset;
+    if (stage != STAGE_COMPUTE || offset < 0x120 || (offset - 0x120) % 8 || (offset - 0x120) / 8 >= 8 || !st.tpool)
+        return NULL;
+    uint64_t handle = st.img[stage][(offset - 0x120) / 8];
+    uint32_t tic = (uint32_t)(handle & 0xfffff);
+    if (!handle || tic >= (uint32_t)st.tpool->count) return NULL;
+    NvnTexEntry *entry = &((NvnTexEntry *)st.tpool->entries)[tic];
+    return entry->tex ? entry : NULL;
+}
+
+static bool storage_info(int stage, const ShaderImage *im, VkDescriptorImageInfo *out) {
+    NvnTexEntry *entry = storage_entry(stage, im);
+    uint32_t fmt = entry && entry->has_view && (entry->view.setmask & 4) ? entry->view.format
+                                                                                   : entry ? entry->tex->format : 0;
+    // Formatted stores are float/normalized. Integer stores need their own shader type.
+    VkImageView view = entry && (im->raw32 || !im->write || !rt_kind(fmt)) ?
+        vk_storage_view(entry->tex, &entry->view, entry->has_view, im->type, im->raw32, im->atomic) : VK_NULL_HANDLE;
+    if (!view) {
+        static int nlog;
+        if (nlog++ < 20) LOG("[compute] unsupported or missing storage image: handle offset %#x, format %#x, type %u, raw32 %d\n",
+                            im->handle_offset, fmt, im->type, im->raw32);
+        return false;
+    }
+    *out = (VkDescriptorImageInfo){VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
+    return true;
+}
+
 // Writes the descriptor set of one stage. gx..gz: compute group counts (driver constants).
 // pre_ii: texture descriptors already resolved by the caller (draw: fragment textures, needed earlier for the
 // viewport decision), or NULL.
@@ -4085,6 +4113,10 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
                 tex_sc[sg][ti][0] = sc[0]; tex_sc[sg][ti][1] = sc[1];
                 tex_wh[sg][ti][0] = wh[0]; tex_wh[sg][ti][1] = wh[1];
             }
+            w[n].pImageInfo = &ii[n];
+        } else if (b->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && b->binding >= 64 && b->binding < 80) {
+            int image = (int)b->binding - 64;
+            if (image >= si->nimages || !storage_info(stage, &si->images[image], &ii[n])) return VK_NULL_HANDLE;
             w[n].pImageInfo = &ii[n];
         } else if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b->binding < 17) {
             bi[n] = cbuf_info(stage, si, (int)b->binding, gx, gy, gz);
@@ -4166,7 +4198,11 @@ static bool cs_get(const ShaderInfo *si, const uint32_t local[3], CsBuild **out)
 static void cs_make(CsBuild *c) {
     VkResult r = VK_ERROR_UNKNOWN;
     size_t n = 0;
-    uint32_t *spv = vk_glsl_to_spirv(c->si->msl, STAGE_COMPUTE, "cs", &n);
+    bool available = true;
+    for (int i = 0; i < c->si->nimages; i++)
+        if (c->si->images[i].write && !c->si->images[i].raw32 && !g_vk.storage_write_formatless) available = false;
+    if (!available) LOG("[compute] device lacks shaderStorageImageWriteWithoutFormat\n");
+    uint32_t *spv = available ? vk_glsl_to_spirv(c->si->msl, STAGE_COMPUTE, "cs", &n) : NULL;
     if (spv) {
         c->nbinds = vk_reflect(spv, n, c->binds, MAX_BIND);
         VkShaderModule m = vk_module(spv, n);
@@ -4681,9 +4717,16 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     }
     nfeedback = 0;
     VkDescriptorSet ds = stage_set(&cp->p, cp->p.set_layout[0], 0, 5, cp->si, NULL, NULL, gx, gy, gz, NULL, NULL, NULL);
+    if (!ds) { stat_skipped++; return; }
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->pipe);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->p.layout, 0, 1, &ds, 0, NULL);
     vkCmdDispatch(cb, gx, gy, gz);
+    for (int i = 0; i < cp->si->nimages; i++) {
+        if (!cp->si->images[i].write) continue;
+        NvnTexEntry *entry = storage_entry(5, &cp->si->images[i]);
+        if (entry) renderer_mark_gpu_owned(entry->tex);
+    }
+    if (cp->si->nimages) vk_full_barrier(cb);
     stat_dispatches++;
     chunk_draws++;
     if (cp->si->writes_gmem) {
