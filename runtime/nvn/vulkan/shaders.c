@@ -73,7 +73,7 @@ static ShaderInfo *xlate_load(uint64_t h, const XlateHeader *want, int stage) {
     if (!f) return NULL;
     XlateHeader hd;
     ShaderInfo *si = NULL;
-    bool ok = fread(&hd, sizeof hd, 1, f) == 1 && hd.msl_len < (64u << 20);
+    bool ok = fread(&hd, sizeof hd, 1, f) == 1 && hd.msl_len && hd.msl_len < (64u << 20);
     if (ok && want)
         ok = !memcmp(&hd, want, offsetof(XlateHeader, msl_len)) && hd.bin_size == want->bin_size &&
              !memcmp(&hd.key, &want->key, sizeof hd.key) && hd.stage == want->stage;
@@ -85,7 +85,9 @@ static ShaderInfo *xlate_load(uint64_t h, const XlateHeader *want, int stage) {
         char *msl = malloc(hd.msl_len + 1);
         uint8_t *z = NULL;
         bool got = si && msl && fread(si, sizeof *si, 1, f) == 1 && fread(&zn, 4, 1, f) == 1 && zn < (64u << 20) &&
-                   (z = malloc(zn ? zn : 1)) && fread(z, 1, zn, f) == zn && si->stage == hd.stage;
+                   (z = malloc(zn ? zn : 1)) && fread(z, 1, zn, f) == zn && si->stage == hd.stage &&
+                   si->ntex >= 0 && si->ntex <= (int)(sizeof si->tex / sizeof si->tex[0]) &&
+                   si->nimages >= 0 && si->nimages <= (int)(sizeof si->images / sizeof si->images[0]);
         uLongf len = hd.msl_len;
         if (got && uncompress((Bytef *)msl, &len, z, zn) == Z_OK && len == hd.msl_len) {
             msl[hd.msl_len] = 0;
