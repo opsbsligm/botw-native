@@ -98,6 +98,7 @@ typedef struct TexBackend {
     VkImageViewType base_type;
     uint32_t width, height, depth, layers, levels, samples;
     VkImageAspectFlags aspect;
+    VkImageUsageFlags image_usage;
     bool gpu_owned, uploaded, dynamic;
     bool storage_ok;         // created with STORAGE usage and a supported uncompressed colour format
     bool slices_renderable;  // 3D image made 2D-array compatible: its slices are render targets

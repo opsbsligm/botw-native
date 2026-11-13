@@ -10,6 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SurfaceShaders(unittest.TestCase):
+    def test_production_sampling_and_storage_views_have_distinct_valid_usage(self):
+        compiler = shutil.which('clang')
+        self.assertIsNotNone(compiler)
+        deps = Path(os.environ.get('NATIVE_DEPS', '/opt/native/deps'))
+        with tempfile.TemporaryDirectory(prefix='surface-view-usage-') as temporary:
+            binary = Path(temporary) / 'view-usage'
+            result = subprocess.run([compiler, '-std=gnu11', '-O1', '-ffunction-sections', '-fdata-sections',
+                '-Wl,--gc-sections', '-I' + str(ROOT / 'runtime'), '-I' + str(ROOT / 'third_party/vma'),
+                '-I' + str(deps / 'include'), str(ROOT / 'tests/storage_view_usage_test.c'),
+                '-lm', '-lpthread', '-o', str(binary)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            checked = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
     def test_surface_readback_probe_builds_without_gpu_execution(self):
         compiler = shutil.which('clang')
         self.assertIsNotNone(compiler, 'The fixed Linux SDK must provide clang')

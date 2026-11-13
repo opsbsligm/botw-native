@@ -419,6 +419,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     }
     b->cube_ok = (ci.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0;
     b->storage_ok = (ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0;
+    b->image_usage = ci.usage;
     static uint64_t serials;
     b->serial = __atomic_add_fetch(&serials, 1, __ATOMIC_RELAXED);
     b->format = vf;
@@ -1152,7 +1153,7 @@ void renderer_upload_rgba(NvnTexture *t, const void *rgba, uint32_t w, uint32_t 
 
 // ================================================================== views
 #define VIEW_TAB 16384
-typedef struct { TexBackend *b; uint64_t k1, k2; VkImageView view; } ViewEnt;
+typedef struct { TexBackend *b; uint64_t k1, k2; VkImageView view; VkImageUsageFlags usage; } ViewEnt;
 static ViewEnt view_tab[VIEW_TAB];
 
 // Views may still be referenced by submitted or pending work: destroyed once that has completed.
@@ -1164,20 +1165,23 @@ static void views_forget(TexBackend *b) {
         if (view_tab[i].b == b) { defer((Dead){.view = view_tab[i].view}); view_tab[i].b = NULL; view_tab[i].view = VK_NULL_HANDLE; }
 }
 
-VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uint32_t lv0, uint32_t nlv, uint32_t ly0,
-                          uint32_t nly, VkComponentMapping sw, VkImageAspectFlags aspect) {
+static VkImageView image_view_usage(TexBackend *b, VkImageViewType type, VkFormat fmt, uint32_t lv0, uint32_t nlv, uint32_t ly0,
+                                    uint32_t nly, VkComponentMapping sw, VkImageAspectFlags aspect, VkImageUsageFlags usage) {
     uint64_t k1 = (uint64_t)type | (uint64_t)fmt << 8 | (uint64_t)lv0 << 40 | (uint64_t)nlv << 48 | (uint64_t)aspect << 56;
     uint64_t k2 = (uint64_t)ly0 | (uint64_t)nly << 16 | (uint64_t)sw.r << 32 | (uint64_t)sw.g << 40 | (uint64_t)sw.b << 48 | (uint64_t)sw.a << 56;
-    uint64_t h = ((uint64_t)(uintptr_t)b * 0x9E3779B97F4A7C15ull) ^ (k1 * 0xC2B2AE3D27D4EB4Full) ^ (k2 * 0x165667B19E3779F9ull);
+    uint64_t h = ((uint64_t)(uintptr_t)b * 0x9E3779B97F4A7C15ull) ^ (k1 * 0xC2B2AE3D27D4EB4Full) ^
+                 (k2 * 0x165667B19E3779F9ull) ^ ((uint64_t)usage * 0x85EBCA77C2B2AE63ull);
     uint32_t slot = (uint32_t)(h ^ (h >> 32)) & (VIEW_TAB - 1);
     for (int probe = 0; probe < 16; probe++, slot = (slot + 1) & (VIEW_TAB - 1)) {
         ViewEnt *e = &view_tab[slot];
-        if (e->b == b && e->k1 == k1 && e->k2 == k2) return e->view;
+        if (e->b == b && e->k1 == k1 && e->k2 == k2 && e->usage == usage) return e->view;
         if (!e->b) break;
     }
     extern uint64_t prof_views_created;
     prof_views_created++;
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = b->image, .viewType = type,
+    VkImageViewUsageCreateInfo use = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO, .usage = usage};
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .pNext = usage ? &use : NULL,
+                                .image = b->image, .viewType = type,
                                 .format = fmt, .components = sw, .subresourceRange = {aspect, lv0, nlv, ly0, nly}};
     VkImageView v;
     if (vkCreateImageView(g_vk.dev, &vi, NULL, &v) != VK_SUCCESS) {
@@ -1187,8 +1191,16 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     }
     ViewEnt *e = &view_tab[slot];
     if (e->b) { defer((Dead){.view = e->view}); vk_view_gen++; }  // evict (16 probes taken)
-    *e = (ViewEnt){b, k1, k2, v};
+    *e = (ViewEnt){b, k1, k2, v, usage};
     return v;
+}
+
+VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uint32_t lv0, uint32_t nlv, uint32_t ly0,
+                          uint32_t nly, VkComponentMapping sw, VkImageAspectFlags aspect) {
+    // A sampling/render view can reinterpret the image as sRGB, which does not support storage access.
+    // Restrict this view's usage instead of inheriting STORAGE from the shared allocation (VUID02275).
+    VkImageUsageFlags usage = b->storage_ok ? b->image_usage & ~VK_IMAGE_USAGE_STORAGE_BIT : 0;
+    return image_view_usage(b, type, fmt, lv0, nlv, ly0, nly, sw, aspect, usage);
 }
 
 static VkImageViewType view_type_for(int textype) {
@@ -1305,7 +1317,7 @@ VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_vie
     if (!format_supports(vf, need)) return VK_NULL_HANDLE;
     const VkComponentMapping id = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-    return vk_image_view(b, want, vf, level, 1, layer, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    return image_view_usage(b, want, vf, level, 1, layer, 1, id, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_USAGE_STORAGE_BIT);
 }
 
 VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool render, int want_textype) {

@@ -13,6 +13,8 @@
 
 仅为格式能力允许的非压缩、非深度单采样图像增加 storage usage。绑定时进一步检查视图、位宽、层级、维度、格式与缩放；不支持的绑定明确报告并拒绝该 dispatch，不绑定假的零纹理继续执行。
 
+同一图像的采样/附件视图去掉继承的 storage usage，计算视图则仅允许 storage usage，并把用途纳入视图缓存键。这样可保留 sRGB 重解释与采样 swizzle，避免向不支持 storage 的视图格式继承该用途（VUID 02275）。`tests/storage_view_usage_test.c` 捕获生产 `vkCreateImageView` 调用，检查用途限制、同格式不同用途的缓存隔离、重复复用及原有非 storage 路径；该回归不需要 GPU，也不替代真实驱动与游戏绑定验收。用途限制遵循 [VkImageViewUsageCreateInfo](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageViewUsageCreateInfo.html)。
+
 ## 明确保留的缺口
 
 Metal、bindless、数组/3D、其他原子操作或位宽、非默认缓存/越界模式、其他原始位宽和部分分量写入仍拒绝翻译。整数格式化写入、压缩/深度/回退图像、自定义 swizzle 和放大后的 storage image 仍拒绝绑定。放大图像必须先实现与 dispatch 覆盖范围一致的坐标语义，不能只改 view 后声称分辨率适配完成。
