@@ -1,6 +1,7 @@
 // Translated NVN programs (with their cache), shader modules, descriptor layouts from the SPIR-V itself, built-in
 // shaders. GLSL -> SPIR-V is in spirv.c.
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,14 +25,16 @@ const char *vk_shader_version(void) {
 
 // The shader and pipeline caches live in cache/ under the data root (the working directory), or in the folder
 // SAVAGEWIND_CACHE_DIR names (tests that must not touch the player's caches).
+static const char *cache_dir;
+static pthread_once_t cache_dir_once = PTHREAD_ONCE_INIT;
+static void cache_dir_init(void) {
+    const char *e = getenv("SAVAGEWIND_CACHE_DIR");
+    cache_dir = e && *e ? e : "cache";
+    mkdir(cache_dir, 0755);
+}
 const char *vk_cache_dir(void) {
-    static const char *dir;
-    if (!dir) {
-        const char *e = getenv("SAVAGEWIND_CACHE_DIR");
-        dir = e && *e ? e : "cache";
-        mkdir(dir, 0755);
-    }
-    return dir;
+    pthread_once(&cache_dir_once, cache_dir_init);
+    return cache_dir;
 }
 
 void vk_cache_path(char *out, size_t n, const char *name) {
@@ -147,22 +150,24 @@ ShaderInfo *vk_translate_load_id(uint64_t id, int stage) {
     return si;
 }
 
-static void xlate_store(uint64_t h, const XlateHeader *hd, const ShaderInfo *si) {
-    static int made;
-    char path[512], tmp[540], name[96];
-    if (!made) {
-        made = 1;
-        vk_cache_path(path, sizeof path, "xlate");
-        mkdir(path, 0755);
-        snprintf(name, sizeof name, "xlate/%s", vk_cache_dir_id(maxwell_translator_id()));
-        vk_cache_path(path, sizeof path, name);
-        mkdir(path, 0755);
-    }
+static pthread_once_t xlate_dirs_once = PTHREAD_ONCE_INIT;
+static void xlate_dirs_init(void) {
+    char path[512], name[96];
+    vk_cache_path(path, sizeof path, "xlate");
+    mkdir(path, 0755);
+    snprintf(name, sizeof name, "xlate/%s", vk_cache_dir_id(maxwell_translator_id()));
+    vk_cache_path(path, sizeof path, name);
+    mkdir(path, 0755);
+}
+static bool xlate_store(uint64_t h, const XlateHeader *hd, const ShaderInfo *si) {
+    // All writers must wait until both directories exist, including on slow filesystems.
+    pthread_once(&xlate_dirs_once, xlate_dirs_init);
+    char path[512], tmp[540];
     xlate_path(path, sizeof path, h);
     snprintf(tmp, sizeof tmp, "%s.%llx", path, (unsigned long long)(uintptr_t)si);
     uLongf zn = compressBound(hd->msl_len);
     uint8_t *z = malloc(zn);
-    if (!z) return;
+    if (!z) return false;
     bool ok = compress2(z, &zn, (const Bytef *)si->msl, hd->msl_len, 1) == Z_OK;
     ShaderInfo copy = *si;
     copy.msl = NULL;
@@ -172,7 +177,9 @@ static void xlate_store(uint64_t h, const XlateHeader *hd, const ShaderInfo *si)
          fwrite(z, 1, zn, f) == zn;
     if (f && fclose(f)) ok = false;
     free(z);
-    if (f && (!ok || rename(tmp, path) != 0)) remove(tmp);  // (another thread may have stored it first)
+    if (ok && rename(tmp, path)) ok = false;
+    if (f && !ok) remove(tmp);
+    return ok;
 }
 
 // A cache folder's name for an id (TRANSLATOR_ID / SPIRV_ID are 16 hex digits; built without the Makefile, a date)
@@ -423,7 +430,8 @@ ShaderInfo *vk_xlate_read(const uint8_t *code, size_t max_size, int stage, const
     XlateHeader hd;
     uint64_t h = xlate_id(code, max_size, stage, key, &hd);
     ShaderInfo *si = xlate_load(h, &hd, stage);
-    if (!si) {
+    static _Atomic int missing_cache_logs;
+    if (!si && atomic_fetch_add(&missing_cache_logs, 1) < 40) {
         char hex[2 * sizeof hd.key + 1];
         const uint8_t *bytes = (const uint8_t *)&hd.key;
         static const char digits[] = "0123456789abcdef";
@@ -454,7 +462,11 @@ int vk_precompile_one(const uint8_t *code, size_t max_size, int stage, const Sha
             return -1;
         }
         hd.msl_len = (uint32_t)strlen(si->msl);
-        xlate_store(h, &hd, si);
+        if (!xlate_store(h, &hd, si)) {
+            snprintf(why, nwhy, "could not save translation cache");
+            maxwell_free(si);
+            return -1;
+        }
         made = true;
     }
     int r = vk_spirv_ensure(si->msl, stage);
@@ -511,7 +523,12 @@ ShaderInfo *vk_translate_cached(const uint8_t *code, size_t max_size, int stage,
         si = maxwell_translate(code, max_size, stage, key);
         if (!si->msl) return si;
         hd.msl_len = (uint32_t)strlen(si->msl);
-        xlate_store(h, &hd, si);
+        if (!xlate_store(h, &hd, si)) {
+            static _Atomic int failed_cache_logs;
+            if (atomic_fetch_add(&failed_cache_logs, 1) < 4)
+                LOG("[shader] could not save translation cache %016llx; keeping the in-memory translation\n",
+                    (unsigned long long)h);
+        }
     }
     pthread_mutex_lock(&xlate_lock);
     si = xlate_keep(h, si);

@@ -18,7 +18,7 @@ static XlateHeader store(int textures, int images, bool empty) {
     XlateHeader header = {.magic = {'S', 'W', 'X', '2'}, .info_size = sizeof info,
         .msl_len = empty ? 0 : sizeof source - 1, .bin_size = 16,
         .key = {.glsl = 1}, .stage = STAGE_COMPUTE};
-    xlate_store(cache_id, &header, &info);
+    assert(xlate_store(cache_id, &header, &info));
     return header;
 }
 
