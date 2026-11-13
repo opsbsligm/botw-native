@@ -70,7 +70,7 @@ typedef struct {
 typedef struct {
     uint32_t handle_offset;
     uint8_t type;
-    bool raw32, write;
+    bool raw32, write, atomic;
 } ShaderImage;
 
 typedef struct {

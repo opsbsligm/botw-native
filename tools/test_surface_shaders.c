@@ -29,11 +29,18 @@ static void rejected(uint64_t instruction, bool glsl) {
     maxwell_free(info);
 }
 
-static void accepted(shaderc_compiler_t compiler, shaderc_compile_options_t options, bool store, int dimension) {
-    ShaderInfo *info = translate(surface(store, dimension, 2), true);
+static uint64_t atomic_add(bool signed_word, int dimension, unsigned slot) {
+    return 0xea00000000000000ull | (uint64_t)signed_word << 51 | (uint64_t)dimension << 33 |
+           (uint64_t)(72 + 2 * slot) << 36 | 7ull << 16 | 12ull << 20 | 10ull << 8 | 4;
+}
+
+static void accepted(shaderc_compiler_t compiler, shaderc_compile_options_t options, uint64_t instruction,
+                     bool store, bool atomic, int dimension) {
+    ShaderInfo *info = translate(instruction, true);
     if (!info->msl) { fprintf(stderr, "translation: %s\n", info->error); abort(); }
     assert(info->nimages == 1 && info->ntex == 0);
-    assert(info->images[0].handle_offset == 0x130 && info->images[0].raw32 == !store && info->images[0].write == store);
+    assert(info->images[0].handle_offset == 0x130 && info->images[0].raw32 == !store &&
+           info->images[0].write == (store || atomic) && info->images[0].atomic == atomic);
     assert(info->images[0].type == (dimension == 0 ? TEXTYPE_1D : TEXTYPE_2D));
     shaderc_compilation_result_t result = shaderc_compile_into_spv(compiler, info->msl, strlen(info->msl),
         shaderc_compute_shader, "original-surface-fixture", "main", options);
@@ -63,10 +70,15 @@ int main(void) {
     shaderc_compile_options_t options = shaderc_compile_options_initialize();
     assert(compiler && options);
     shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
-    accepted(compiler, options, false, 0);
-    accepted(compiler, options, false, 3);
-    accepted(compiler, options, true, 0);
-    accepted(compiler, options, true, 3);
+    accepted(compiler, options, surface(false, 0, 2), false, false, 0);
+    accepted(compiler, options, surface(false, 3, 2), false, false, 3);
+    accepted(compiler, options, surface(true, 0, 2), true, false, 0);
+    accepted(compiler, options, surface(true, 3, 2), true, false, 3);
+    accepted(compiler, options, atomic_add(false, 0, 2), false, true, 0);
+    accepted(compiler, options, atomic_add(true, 3, 2), false, true, 3);
+    accepted(compiler, options, atomic_add(true, 3, 2) | 255, false, true, 3); // discarded return still modifies the image
+    accepted(compiler, options, surface(false, 0, 2) | 1ull << 23, false, false, 0);
+    accepted(compiler, options, atomic_add(false, 0, 2) | 1ull << 28, false, true, 0);
     rejected(surface(false, 0, 0), false);                       // MSL remains unsupported
     rejected(surface(false, 5, 0), true);                        // unimplemented 3D
     rejected(surface(false, 0, 0) & ~(1ull << 51), true);        // bindless
@@ -77,8 +89,11 @@ int main(void) {
     rejected(surface(false, 0, 0) ^ (1ull << 20), true);         // raw 64-bit load
     rejected(surface(true, 3, 0) ^ (1ull << 20), true);          // partial component store
     rejected(surface(true, 3, 0) | (1ull << 52), true);          // raw store
+    rejected(atomic_add(false, 0, 0) | (2ull << 51), true);      // 64-bit atomic
+    rejected(atomic_add(false, 0, 0) | (1ull << 29), true);      // MIN is not ADD
+    rejected(atomic_add(false, 0, 0) | 0x0060000000000000ull, true); // bindless atomic family
     shaderc_compile_options_release(options);
     shaderc_compiler_release(compiler);
-    puts("surface shaders: 4 SPIR-V/resource cases and 10 rejection cases passed; GPU execution not tested");
+    puts("surface shaders: 9 SPIR-V/resource cases and 13 rejection cases passed; GPU execution not tested");
     return 0;
 }

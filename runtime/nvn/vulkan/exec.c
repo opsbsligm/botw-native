@@ -4070,8 +4070,8 @@ static bool storage_info(int stage, const ShaderImage *im, VkDescriptorImageInfo
     uint32_t fmt = entry && entry->has_view && (entry->view.setmask & 4) ? entry->view.format
                                                                                    : entry ? entry->tex->format : 0;
     // Formatted stores are float/normalized. Integer stores need their own shader type.
-    VkImageView view = entry && (!im->write || !rt_kind(fmt)) ?
-        vk_storage_view(entry->tex, &entry->view, entry->has_view, im->type, im->raw32) : VK_NULL_HANDLE;
+    VkImageView view = entry && (im->raw32 || !im->write || !rt_kind(fmt)) ?
+        vk_storage_view(entry->tex, &entry->view, entry->has_view, im->type, im->raw32, im->atomic) : VK_NULL_HANDLE;
     if (!view) {
         static int nlog;
         if (nlog++ < 20) LOG("[compute] unsupported or missing storage image: handle offset %#x, format %#x, type %u, raw32 %d\n",
@@ -4200,7 +4200,7 @@ static void cs_make(CsBuild *c) {
     size_t n = 0;
     bool available = true;
     for (int i = 0; i < c->si->nimages; i++)
-        if (c->si->images[i].write && !g_vk.storage_write_formatless) available = false;
+        if (c->si->images[i].write && !c->si->images[i].raw32 && !g_vk.storage_write_formatless) available = false;
     if (!available) LOG("[compute] device lacks shaderStorageImageWriteWithoutFormat\n");
     uint32_t *spv = available ? vk_glsl_to_spirv(c->si->msl, STAGE_COMPUTE, "cs", &n) : NULL;
     if (spv) {

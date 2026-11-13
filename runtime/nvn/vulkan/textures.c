@@ -1274,7 +1274,7 @@ void vk_block_flush(VkCommandBuffer cb, TexBackend *b) {
 
 // render: attachment view (one level, one layer). Otherwise a sampled view of type want_textype (TEXTYPE_*),
 // with the NVN component swizzle, converting between compatible types the way renderer.m does.
-VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_view, int textype, bool raw32) {
+VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_view, int textype, bool raw32, bool atomic) {
     TexBackend *b = vk_tex(t, false);  // preserve CPU-provided contents before a partial GPU write
     if (!has_view) v = NULL;
     uint32_t fmt = v && (v->setmask & 4) ? v->format : t->format;
@@ -1301,7 +1301,8 @@ VkImageView vk_storage_view(NvnTexture *t, const NvnTextureView *v, bool has_vie
         (v && (v->setmask & 32) && v->target != t->target))
         return VK_NULL_HANDLE;
     VkFormat vf = raw32 ? VK_FORMAT_R32_UINT : vk_format(fmt);
-    if (!format_supports(vf, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) return VK_NULL_HANDLE;
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | (atomic ? VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT : 0);
+    if (!format_supports(vf, need)) return VK_NULL_HANDLE;
     const VkComponentMapping id = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
     return vk_image_view(b, want, vf, level, 1, layer, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
