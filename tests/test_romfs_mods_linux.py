@@ -11,6 +11,7 @@ HARNESS = r'''
 #define _DEFAULT_SOURCE 1
 #include "mods.h"
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -19,6 +20,17 @@ HARNESS = r'''
 #include <sys/syscall.h>
 #include <unistd.h>
 int __real_fsync(int fd);
+struct dirent *__real_readdir(DIR *directory);
+struct dirent *__wrap_readdir(DIR *directory) {
+ struct stat actual,source;
+ if(getenv("MODS_TEST_FAIL_READDIR") && !fstat(dirfd(directory),&actual) &&
+    !stat("mods/active/romfs",&source) && actual.st_dev==source.st_dev && actual.st_ino==source.st_ino) {
+  errno=EIO;fputs("INJECTED_READDIR\n",stderr);return NULL;
+ }
+ struct dirent *entry=__real_readdir(directory);
+ if(entry && getenv("MODS_TEST_SUCCESS_ERRNO")) errno=EIO;
+ return entry;
+}
 long __real_syscall(long number, ...);
 long __wrap_syscall(long number, ...) {
  static int renames;
@@ -63,7 +75,7 @@ class PortableRomfsMods(unittest.TestCase):
         cls.binary = directory / 'check'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-pthread',
                         '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
-                        '-Wl,--wrap=fsync', '-Wl,--wrap=syscall',
+                        '-Wl,--wrap=fsync', '-Wl,--wrap=syscall', '-Wl,--wrap=readdir',
                         '-I', str(ROOT / 'runtime'), str(source), str(ROOT / 'runtime/mods.c'),
                         '-o', str(cls.binary)], check=True, capture_output=True, text=True, timeout=30)
 
@@ -171,6 +183,27 @@ class PortableRomfsMods(unittest.TestCase):
         self.put('mods/active/romfs/a.bin', b'new')
         self.apply(fail_sync=True)
         self.assertEqual((self.view / 'a.bin').read_bytes(), b'healthy')
+
+    def test_readdir_failure_keeps_previous_view(self):
+        source = self.put('mods/active/romfs/a.bin', b'healthy')
+        self.apply(1)
+        source.unlink()
+        self.put('mods/active/romfs/a.bin', b'new')
+        env = dict(os.environ, MODS_TEST_FAIL_READDIR='1')
+        result = subprocess.run([str(self.binary), str(self.root)], capture_output=True,
+                                text=True, timeout=10, env=env)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('INJECTED_READDIR', result.stderr)
+        self.assertEqual((self.view / 'a.bin').read_bytes(), b'healthy')
+        self.assertEqual(list((self.root / 'native-mods').glob('.romfs-new-*')), [])
+
+    def test_successful_readdir_errno_is_not_treated_as_failure(self):
+        self.put('mods/active/romfs/a.bin')
+        env = dict(os.environ, MODS_TEST_SUCCESS_ERRNO='1')
+        result = subprocess.run([str(self.binary), str(self.root)], capture_output=True,
+                                text=True, timeout=10, env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.view / 'a.bin').read_bytes(), b'mod')
 
     def test_first_publication_sync_failure_leaves_no_view(self):
         self.put('mods/active/romfs/a.bin')

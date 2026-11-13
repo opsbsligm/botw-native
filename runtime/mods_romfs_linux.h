@@ -57,13 +57,13 @@ static bool mods_view_remove(int parent, const char *name, unsigned depth) {
     if (!directory) { close(child); return false; }
     bool ok = true;
     struct dirent *entry;
-    errno = 0;
-    while ((entry = readdir(directory))) {
+    for (;;) {
+        errno = 0;
+        entry = readdir(directory);
+        if (!entry) { if (errno) ok = false; break; }
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (!mods_view_remove(child, entry->d_name, depth + 1)) { ok = false; break; }
-        errno = 0;
     }
-    if (errno) ok = false;
     closedir(directory);
     return ok && !unlinkat(parent, name, AT_REMOVEDIR);
 }
@@ -74,8 +74,10 @@ static bool mods_view_collect_stale(int parent) {
     struct dirent *entry;
     bool ok = true;
     unsigned visited = 0;
-    errno = 0;
-    while ((entry = readdir(directory))) {
+    for (;;) {
+        errno = 0;
+        entry = readdir(directory);
+        if (!entry) { if (errno) ok = false; break; }
         const char *name = entry->d_name;
         if (strncmp(name, ".romfs-new-", 11)) continue;
         if (++visited > 128) { errno = EFBIG; ok = false; break; }
@@ -92,9 +94,7 @@ static bool mods_view_collect_stale(int parent) {
         bool owned = mods_view_owned(child) && mods_view_discardable(child);
         close(child);
         if (owned && !mods_view_remove(parent, name, 0)) { ok = false; break; }
-        errno = 0;
     }
-    if (errno) ok = false;
     closedir(directory);
     return ok;
 }
@@ -114,8 +114,10 @@ static bool mods_view_stage(int source, int target, unsigned depth, bool legacy_
     if (!directory) { close(scan); return false; }
     bool ok = true;
     struct dirent *entry;
-    errno = 0;
-    while ((entry = readdir(directory))) {
+    for (;;) {
+        errno = 0;
+        entry = readdir(directory);
+        if (!entry) { if (errno) ok = false; break; }
         const char *name = entry->d_name;
         if (name[0] == '.' || (legacy_root && mods_code_entry(name))) continue;
         struct stat before;
@@ -144,9 +146,7 @@ static bool mods_view_stage(int source, int target, unsigned depth, bool legacy_
             if (ok) (*files)++;
         } else { errno = EINVAL; ok = false; }
         if (!ok) break;
-        errno = 0;
     }
-    if (errno) ok = false;
     closedir(directory);
     return ok && !fsync(target);
 }
@@ -191,16 +191,16 @@ static int mods_linux_romfs_apply(void) {
         int count = 0;
         bool listed = true;
         struct dirent *entry;
-        errno = 0;
-        while ((entry = readdir(directory))) {
+        for (;;) {
+            errno = 0;
+            entry = readdir(directory);
+            if (!entry) { if (errno) listed = false; break; }
             if (entry->d_name[0] == '.') continue;
             if (fstatat(mods, entry->d_name, &info, AT_SYMLINK_NOFOLLOW)) { listed = false; break; }
             if (S_ISREG(info.st_mode)) continue;
             if (!S_ISDIR(info.st_mode) || count == 64) { errno = EINVAL; listed = false; break; }
             snprintf(names[count++].name, sizeof names[0].name, "%s", entry->d_name);
-            errno = 0;
         }
-        if (errno) listed = false;
         closedir(directory);
         if (!listed) goto done;
         for (int i = 0; i < count; i++) for (int j = i + 1; j < count; j++)
