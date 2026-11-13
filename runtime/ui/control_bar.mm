@@ -15,6 +15,7 @@ extern "C" {
 #include "../nvn/output_scale.h"
 #include "../nvn/precompile.h"
 #include "../nvn/warmup.h"
+bool gamelib_legacy_sdk7_profile(void);
 void input_reset(void);
 void menu_request_window_size_apply(void);
 }
@@ -62,7 +63,14 @@ void control_bar_draw(float) {
              if(nd_ui_choice("##perf-overlay",&po,pn,3)) {g_settings.perf_overlay=po;dirty=true;}}
             nd_ui_label(t("Anti-aliasing","抗锯齿"));
             const char *aa[]={t("Off","关闭"),"SMAA","TAA"};
-            dirty|=nd_ui_choice("##antialias",&g_settings.antialias,aa,3);
+            if(ImGui::BeginCombo("##antialias",aa[std::clamp(rt_antialias(),0,2)])) {
+                for(int i=0;i<3;i++) {
+                    ImGui::BeginDisabled(!antialias_available(i));
+                    if(ImGui::Selectable(aa[i],rt_antialias()==i,0,ImVec2(0,44))) {g_settings.antialias=i;dirty=true;}
+                    ImGui::EndDisabled();
+                }
+                ImGui::EndCombo();
+            }
             nd_ui_label(t("Upscaling","画面上采样"));
             const int methods[]={UPSCALE_OFF,UPSCALE_FSR1,UPSCALE_FSR3};
             const char *upscalers[]={t("Native","原始画面"),"AMD FSR 1",t("FSR 3.1 (experimental)","FSR 3.1（实验）")};int current=0;
@@ -94,10 +102,14 @@ void control_bar_draw(float) {
              if(nd_ui_choice("##texpool",&pi,pn2,6)) {g_settings.tex_pool_mib=poolmib[pi];dirty=true;}
              ImGui::TextWrapped("%s",t("Warns when the game creates a texture pool above this threshold. This does not increase available memory.","游戏创建的贴图池超过此阈值时提示。此设置不会增加可用内存。"));}
             nd_ui_label(t("Field of view","视野范围"));
+            ImGui::BeginDisabled(!output_fov_available());
             {static const int fov[]=FOV_CHOICES;static const char *fnames[9];static char fbuf[9][8];
              for(int i=0;i<9;i++){snprintf(fbuf[i],8,"%d%%",fov[i]);fnames[i]=fbuf[i];}
              int fi=3;for(int i=0;i<9;i++) if(g_settings.fov==fov[i]) fi=i;
              dirty|=nd_ui_choice("##fov",&fi,fnames,9);g_settings.fov=fov[fi];}
+            ImGui::EndDisabled();
+            if(!output_fov_available()) ImGui::TextWrapped("%s",t("Field of view needs validated camera and cutscene support for this game version.","此版本视野调整尚待完成相机与过场验证。"));
+            else if(gamelib_legacy_sdk7_profile()) ImGui::TextWrapped("%s",t("Experimental camera test; cutscenes keep the selected field of view too.","相机实验模式：过场也会使用所选视野。"));
             ImGui::TextWrapped(t("Backend anti-aliasing: %s\nRender scale: %.2fx","后端抗锯齿：%s\n当前渲染比例：%.2f 倍"),aa[std::clamp(rt_antialias(),0,2)],upscale_factor());
             if(ImGui::TreeNode(t("Window size / capabilities","窗口尺寸与能力说明"))) {
                 nd_ui_label(t("Window size","窗口尺寸"));
