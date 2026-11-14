@@ -18,6 +18,7 @@
 #include "../ipc.h"
 #include "../language.h"
 #include "../romfs_image.h"
+#include "../rstb_budget.h"
 #include "../input_bind.h"
 #include "../nvn/glyphs.h"
 #include "../deck_help_labels.h"
@@ -413,10 +414,12 @@ static void voice_redirect(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
 // it loads the Demo*.bars banks). So the RSTB the game reads is a copy whose entries for those paths grow by as much
 // as their data did (and a little: the room varies with alignment), served from memory like Version.txt. Its format:
 // Yaz0 over "RSTB", u32 CRC count, u32 name count, {crc32(path), size} sorted by crc32, then {char[128], size}.
+// TEST(rstb_yaz0:begin)
 static uint8_t *yaz0_unpack(const uint8_t *d, size_t n, size_t *out_n) {
     if (n < 16 || memcmp(d, "Yaz0", 4)) return NULL;
     size_t size = (size_t)d[4] << 24 | (size_t)d[5] << 16 | (size_t)d[6] << 8 | d[7], s = 16, w = 0;
     uint8_t *o = malloc(size ? size : 1);
+    if (!o) return NULL;
     while (w < size && s < n) {
         uint8_t code = d[s++];
         for (int b = 0; b < 8 && w < size && s < n; b++) {
@@ -438,6 +441,7 @@ static uint8_t *yaz0_unpack(const uint8_t *d, size_t n, size_t *out_n) {
 // Yaz0 with literal bytes only (a 0xFF flag before every 8): what the game's decoder reads, no search needed
 static uint8_t *yaz0_pack_literal(const uint8_t *d, size_t n, size_t *out_n) {
     uint8_t *o = malloc(16 + n + (n + 7) / 8), *w = o;
+    if (!o) return NULL;
     memcpy(w, "Yaz0", 4);
     w[4] = (uint8_t)(n >> 24), w[5] = (uint8_t)(n >> 16), w[6] = (uint8_t)(n >> 8), w[7] = (uint8_t)n;
     memset(w + 8, 0, 8);
@@ -451,6 +455,7 @@ static uint8_t *yaz0_pack_literal(const uint8_t *d, size_t n, size_t *out_n) {
     *out_n = (size_t)(w - o);
     return o;
 }
+// TEST(rstb_yaz0:end)
 
 // Yaz0 with back-references (greedy, hash chains over the 4 KB window): for files whose size the game holds to
 // (a pack's resources are read into buffers of about their size). hdr: the original's 16 bytes (its alignment).
@@ -874,22 +879,6 @@ static void quickmenu_capture_patch(const uint8_t *fmeta, uint64_t foff, uint64_
         pn, qn, (plat_now_ns() - t0) / 1e6);
 }
 
-// An RSTB entry: names first (paths whose crc32 collides), then the crc32 table (sorted). NULL when it has none.
-static uint32_t *rstb_entry(uint8_t *d, uint32_t ncrc, uint32_t nname, const char *path) {
-    for (uint32_t i = 0; i < nname; i++)
-        if (!strncmp((const char *)d + 12 + ncrc * 8 + i * 132, path, 128))
-            return (uint32_t *)(d + 12 + ncrc * 8 + i * 132 + 128);
-    uint32_t crc = (uint32_t)crc32(0, (const Bytef *)path, (uInt)strlen(path));
-    for (uint32_t lo = 0, hi = ncrc; lo < hi;) {
-        uint32_t mid = (lo + hi) / 2, c;
-        memcpy(&c, d + 12 + mid * 8, 4);
-        if (c == crc) return (uint32_t *)(d + 12 + mid * 8 + 4);
-        if (c < crc) lo = mid + 1;
-        else hi = mid;
-    }
-    return NULL;
-}
-
 // A RomFS with the DLC merged into it (#188, #242): some dumping guides copy the DLC's RomFS over the game's, so its
 // main-map files (Map/MainField/D-7/D-7_Dynamic.smubin...) are the DLC's versions, a few KB bigger than the game's.
 // On the console the game reads those from the DLC (aoc:/0010/...), sized by their own "Aoc/0010/<path>" entries,
@@ -910,10 +899,27 @@ static bool romfs_has_dlc_merged(void) {
 
 // The RSTB's name for a RomFS path: Yaz0-compressed files drop the 's' their extension starts with
 // (D-7_Dynamic.smubin -> D-7_Dynamic.mubin); .sarc is the one extension that really starts with an 's'.
+// TEST(rstb_budget:begin)
 static void rstb_name(const char *path, char *out, size_t cap) {
     snprintf(out, cap, "%s", path);
     char *dot = strrchr(out, '.');
     if (dot && dot[1] == 's' && strcmp(dot, ".sarc") && !strchr(dot, '/')) memmove(dot + 1, dot + 2, strlen(dot + 2) + 1);
+}
+
+// Bound both the encoded input and the Yaz0 output before allocating mod-controlled sizes.
+#define RSTB_MAX_BYTES (32u << 20)
+static uint8_t *rstb_decode(const uint8_t *z, size_t zn, size_t *n) {
+    if (!z || zn < 12 || zn > RSTB_MAX_BYTES) return NULL;
+    uint8_t *d = NULL;
+    if (!memcmp(z, "RSTB", 4)) {
+        d = malloc(zn);
+        if (d) memcpy(d, z, zn), *n = zn;
+    } else if (zn >= 16 && !memcmp(z, "Yaz0", 4)) {
+        uint32_t size = (uint32_t)z[4] << 24 | (uint32_t)z[5] << 16 | (uint32_t)z[6] << 8 | z[7];
+        if (size <= RSTB_MAX_BYTES) d = yaz0_unpack(z, zn, n);
+    }
+    if (d && !rstb_budget_valid(d, *n)) { free(d); d = NULL; }
+    return d;
 }
 
 static void rstb_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
@@ -928,44 +934,61 @@ static void rstb_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
         return;
     }
     if (k == R->rom_nfiles) { LOG("[fs] voices: no %s, %d bigger banks left as they are\n", rstb_path, R->ngrown); return; }
-    if (overlay_file(rstb_path, host, sizeof host)) {
-        LOG("[fs] voices: the overlay folder replaces the ResourceSizeTable: %d bigger banks left to it\n", R->ngrown);
-        return;
-    }
+    bool overlay = overlay_file(rstb_path, host, sizeof host);
     size_t zn = R->rom_files[k].size, n = 0;
-    uint8_t *z = malloc(zn), *d = NULL;
-    if (romfs_image_pread(R->img, z, zn, R->rom_files[k].off) == (ssize_t)zn) d = yaz0_unpack(z, zn, &n);
+    uint8_t *z = zn <= RSTB_MAX_BYTES ? malloc(zn ? zn : 1) : NULL, *d = NULL;
+    if (z && romfs_image_pread(R->img, z, zn, R->rom_files[k].off) == (ssize_t)zn) d = rstb_decode(z, zn, &n);
     free(z);
-    uint32_t ncrc = 0, nname = 0;
-    if (d && n >= 12) memcpy(&ncrc, d + 4, 4), memcpy(&nname, d + 8, 4);
-    if (!d || memcmp(d, "RSTB", 4) || 12 + (uint64_t)ncrc * 8 + (uint64_t)nname * 132 > n) {
-        LOG("[fs] voices: ResourceSizeTable not as expected, %d bigger banks left as they are\n", R->ngrown);
-        free(d);
-        return;
+    if (!d) FATAL("ResourceSizeTable is unreadable or invalid; cannot safely size native resource patches\n");
+    uint8_t *original = d;
+    size_t original_n = n;
+    if (overlay) {
+        struct stat sb;
+        FILE *f = fopen(host, "rb");
+        z = NULL;
+        if (f && !fstat(fileno(f), &sb) && S_ISREG(sb.st_mode) && sb.st_size >= 12 && sb.st_size <= RSTB_MAX_BYTES) {
+            zn = (size_t)sb.st_size;
+            z = malloc(zn);
+            if (z && fread(z, 1, zn, f) == zn && fgetc(f) == EOF && !ferror(f)) d = rstb_decode(z, zn, &n);
+            else d = NULL;
+        } else d = NULL;
+        if (f) fclose(f);
+        free(z);
+        if (!d) { free(original); FATAL("Mod ResourceSizeTable is unreadable or invalid; disable or repair that mod\n"); }
     }
     int changed = 0, dlc_changed = 0;
     uint64_t added = 0, dlc_added = 0;
     for (int g = 0; g < R->ngrown; g++) {
-        uint32_t grow = (uint32_t)((R->grown[g].grow + 31) & ~31ull) + 32, *size = rstb_entry(d, ncrc, nname, R->grown[g].path);
-        if (!size) continue;  // (no entry: the game sizes it from the file, the dialogue streams)
-        uint32_t v;
-        memcpy(&v, size, 4);
-        v += grow;
-        memcpy(size, &v, 4);
-        changed++;
-        added += grow;
+        const char *path = R->grown[g].path;
+        uint32_t before, floor;
+        if (!rstb_budget_get(original, original_n, path, &before)) continue;  // dialogue streams: sized from file
+        if (!rstb_budget_growth(before, R->grown[g].grow, &floor) ||
+            !rstb_budget_raise(&original, &original_n, path, floor))
+            FATAL("ResourceSizeTable native budget overflow or allocation failure for %s\n", path);
     }
+    if (!overlay) { d = original; n = original_n; }
+    for (int g = 0; g < R->ngrown; g++) {
+        const char *path = R->grown[g].path;
+        uint32_t floor, previous = 0;
+        if (!rstb_budget_get(original, original_n, path, &floor)) continue;
+        if (overlay) {
+            rstb_budget_get(d, n, path, &previous);
+            if (!rstb_budget_raise(&d, &n, path, floor)) FATAL("Cannot merge native ResourceSizeTable budget for %s\n", path);
+        } else if (!rstb_budget_growth(0, R->grown[g].grow, &previous)) {
+            FATAL("ResourceSizeTable native growth overflow for %s\n", path);
+        } else previous = floor - previous;
+        if (floor > previous) { changed++; added += floor - previous; }
+    }
+    if (overlay) free(original);
     if (merged) {
         char name[300], aoc[320];
         for (int i = 0; i < R->rom_nfiles; i++) {
             rstb_name(R->rom_files[i].path, name, sizeof name);
             snprintf(aoc, sizeof aoc, "Aoc/0010/%s", name);
-            uint32_t *base = rstb_entry(d, ncrc, nname, name), *dlc = base ? rstb_entry(d, ncrc, nname, aoc) : NULL;
-            if (!dlc) continue;
             uint32_t bv, dv;
-            memcpy(&bv, base, 4), memcpy(&dv, dlc, 4);
+            if (!rstb_budget_get(d, n, name, &bv) || !rstb_budget_get(d, n, aoc, &dv)) continue;
             if (dv <= bv) continue;
-            memcpy(base, &dv, 4);
+            if (!rstb_budget_raise(&d, &n, name, dv)) FATAL("Cannot merge DLC ResourceSizeTable budget for %s\n", name);
             dlc_changed++;
             dlc_added += dv - bv;
         }
@@ -976,6 +999,7 @@ static void rstb_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
     free(R->rstb_blob);
     R->rstb_blob = yaz0_pack_literal(d, n, &bn);
     free(d);
+    if (!R->rstb_blob) FATAL("Cannot allocate merged ResourceSizeTable\n");
     meta_copy(fmeta, foff, fsz);
     uint64_t rel = R->ov_end - R->rom_data_off, size = bn;
     memcpy(R->ov_meta + R->rom_files[k].meta + 8, &rel, 8);
@@ -984,9 +1008,10 @@ static void rstb_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
     R->ov[R->ov_n++] = (Overlay){R->ov_end, size, NULL, -1, R->rstb_blob};
     R->ov_end = (R->ov_end + size + 0xF) & ~0xFull;
     if (R->ngrown)
-        LOG("[fs] voices: %d files bigger than the game's own, %d ResourceSizeTable entries grown (%llu KB in all)\n",
-            R->ngrown, changed, (unsigned long long)(added >> 10));
+        LOG("[fs] resources: %sResourceSizeTable merged with %d native growth records, %d budget raises (%llu bytes)\n",
+            overlay ? "mod " : "", R->ngrown, changed, (unsigned long long)added);
 }
+// TEST(rstb_budget:end)
 
 static void rom_index(void) {
     uint64_t h[10];
