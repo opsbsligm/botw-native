@@ -7,6 +7,8 @@
 
 #include "hle.h"
 #include "kernel.h"
+#include "game_sites.h"
+#include "guest_memory_profile.h"
 #include <stdatomic.h>
 
 // ------------------------------------------------------------------ results
@@ -297,6 +299,7 @@ typedef struct { uint64_t addr, size; uint32_t type, perm; } Region;
 static Region regions[1024];
 static int nregions;
 static _Atomic uint64_t heap_size;
+static uint64_t application_memory_budget = SW_DEFAULT_APP_MEMORY;
 void nd_atm_heap_bounds(uint64_t *base,uint64_t *size) {*base=HEAP_BASE;*size=atomic_load(&heap_size);}
 static uint64_t tls_next = TLS_BASE;
 uint64_t kernel_heap_size(void) { return heap_size; }  // bytes from HEAP_BASE set by SetHeapSize
@@ -1076,7 +1079,7 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
         case 3: v = ALIAS_SIZE; break;
         case 4: v = HEAP_BASE; break;
         case 5: v = HEAP_MAX; break;
-        case 6: case 21: v = 0xCD500000ull; break;  // application memory (3.2 GB, as on hardware)
+        case 6: case 21: v = application_memory_budget; break;
         case 7: case 22: v = heap_size + 0x4000000; break;
         case 8: v = 0; break;
         case 9: v = 0; break;
@@ -1173,6 +1176,7 @@ void kernel_reset(void) {
     memset(handles, 0, sizeof handles);
     nregions = 0;
     heap_size = 0;
+    application_memory_budget = SW_DEFAULT_APP_MEMORY;
     tls_next = TLS_BASE;
     next_thread_id = 0x50;
     for (int i = 0; i < 4; i++) {
@@ -1320,6 +1324,14 @@ static void *watch_poll(void *arg) {
 }
 
 void kernel_init(void) {
+    // The library's exact SDK7 profile is known before guest threads start.
+    // Freeze the experimental budget for this title session, including GetInfo 6/21.
+    application_memory_budget = sdk7_application_memory(gamelib_legacy_sdk7_profile(),
+        getenv("SAVAGEWIND_SDK7_HD_HEAP"));
+    if (application_memory_budget != SW_DEFAULT_APP_MEMORY)
+        LOG("[memory] SDK7 experimental application budget %llu MiB; heap cap %llu MiB\n",
+            (unsigned long long)(application_memory_budget / (1024 * 1024)),
+            (unsigned long long)(HEAP_MAX / (1024 * 1024)));
     static bool watch_started;
     const char *w = getenv("SAVAGEWIND_WATCH");
     if (!watch_started && w) {
