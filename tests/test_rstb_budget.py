@@ -141,6 +141,14 @@ class RstbBudget(unittest.TestCase):
         self.assertEqual(result.stdout, b'')
         self.assertIn(b'ResourceSizeTable is unreadable or invalid', result.stderr)
 
+    def test_long_crc_paths_can_update_and_insert_without_name_field_limit(self):
+        path = 'Voice/' + 'x' * 140 + '.bars'
+        for original in (table({path: 123, 'a': 7}), table({'a': 7})):
+            with self.subTest(existing=zlib.crc32(path.encode()) in values(original)[0]):
+                out = self.run_probe(original=original, mode='raise:' + path).stdout
+                self.assert_budget(out, path, 32728448)
+                self.assert_budget(out, 'a', 7)
+
 
 if __name__ == '__main__':
     unittest.main()

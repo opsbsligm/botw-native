@@ -68,6 +68,12 @@ int main(int argc, char **argv) {
         assert(!rstb_budget_growth(0, UINT32_MAX, &floor));
         free(data); return 0;
     }
+    if (!strncmp(argv[2], "raise:", 6)) {
+        assert(rstb_budget_valid(data, size));
+        bool ok = rstb_budget_raise(&data, &size, argv[2] + 6, 32728448);
+        if (ok) assert(fwrite(data, 1, size, stdout) == size);
+        free(data); return ok ? 0 : 3;
+    }
     RomfsImage image = {data, size};
     RomFile files[] = {{0, size, "System/Resource/ResourceSizeTable.product.srsizetable", 0},
                        {0, 0, "Actor/Test.sbyml", 32}};

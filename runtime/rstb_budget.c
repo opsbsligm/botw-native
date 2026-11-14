@@ -54,7 +54,7 @@ bool rstb_budget_get(const uint8_t *d, size_t n, const char *path, uint32_t *val
 }
 
 bool rstb_budget_raise(uint8_t **data, size_t *size, const char *path, uint32_t floor) {
-    if (!data || !size || !path || !*path || strlen(path) >= 128 || !shape(*data, *size)) return false;
+    if (!data || !size || !path || !*path || !shape(*data, *size)) return false;
     uint8_t *d = *data;
     size_t off = entry(d, path);
     if (off) {
@@ -68,6 +68,7 @@ bool rstb_budget_raise(uint8_t **data, size_t *size, const char *path, uint32_t 
         const char *name = (const char *)d + 12 + (size_t)nc * 8 + (size_t)i * 132;
         if ((uint32_t)crc32(0, (const Bytef *)name, (uInt)strlen(name)) == hash) collision = true;
     }
+    if (collision && strlen(path) >= 128) return false;
     size_t extra = collision ? 132 : 8;
     if (*size > SIZE_MAX - extra || (collision ? nn : nc) == UINT32_MAX) return false;
     uint8_t *out = malloc(*size + extra);
