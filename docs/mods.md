@@ -30,6 +30,12 @@ python3 build.py build --work /mnt/build/botw-work \
 
 移除代码 Mod 后，使用健康原始 dump，重新执行构建并省略 `--code-mods`，再核验新包。仅删除 Deck 上的补丁文件不能还原已编译代码。部署前保留现用版本，完成精确提交 CI、安全审查、包全部文件校验与实机回归后再原子切换入口。
 
+### SDK7 配套容量实验
+
+`examples/mods/20-sdk7-paired-256` 提供固定 BOTW 1.6.0 Build ID 的三条容量补丁：贴图池 115→256 MiB，实际应用堆请求 3120→3280 MiB，游戏根堆 3088→3248 MiB。应用内存报告需配套 `SAVAGEWIND_SDK7_HD_HEAP=1`。两处游戏初始化分别固定堆大小：单独调整 GetInfo 时，实际请求保持 3120 MiB；只增加 OS 堆时，游戏根堆仍保持 3088 MiB。
+
+将示例目录复制到独立的私有 Mod 根目录，显式传入 `--code-mods`，使用健康原始三模块重新生成和编译；启动该候选时再设置上述环境变量。其它 Mod 的重叠容量修改须先移除，原始指纹门禁继续执行。此实验保持原 3328 MiB SetHeapSize 上限，实际 HD 资源负载、画质和长期稳定性仍待独立验证。
+
 ## 旧 setup 接口
 
 Linux 便携包启动时从可写数据目录 `$XDG_DATA_HOME/savagewind/mods/<名称>/romfs/` 读取资源覆盖。`romfs` 内的相对路径直接对应游戏 RomFS；旧式直接放在 Mod 根目录的资源仍可用，但 `exefs`、IPS/IPS32/PCHTXT 和根目录 README 不混入资源覆盖。点号开头的 Mod 停用，按名称排序、后者覆盖前者。

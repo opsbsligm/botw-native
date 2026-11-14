@@ -1,0 +1,8 @@
+# Explicit paired SDK7 experiment; original complete NSO hashes remain mandatory.
+@nsobid-8e9978d50bdd20b4c8395a106c27ffde
+@flag offset_shift 0x100
+@enabled
+00E536DC 00A0B952
+00E53FA0 1560B952
+01804C44 0800A252
+@stop
