@@ -100,7 +100,7 @@ def age_pipe(command, produce, consume):
             pass
         worker.join()
         status = proc.wait()
-        if errors:
+        if errors and not (status and isinstance(errors[0], BrokenPipeError)):
             raise errors[0]
         if status:
             raise ValueError('age failed; nothing was installed')

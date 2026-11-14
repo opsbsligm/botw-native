@@ -143,3 +143,11 @@ class StreamingRecovery(unittest.TestCase):
             with self.assertRaisesRegex(OSError,'disk full'):
                 recovery.age_pipe([str(relay(root)),'-R','unused'],produce,fail_output)
             self.assert_clean(root,root/'unused')
+
+    def test_early_age_rejection_reports_failure_instead_of_a_broken_pipe(self):
+        def produce(stream):
+            for _ in range(10000):stream.write(b'x'*4096)
+        with self.assertRaisesRegex(ValueError,'age failed'):
+            recovery.age_pipe([sys.executable,'-c','import sys; sys.exit(7)'],
+                              produce,lambda stream: None)
+        self.assertFalse([t for t in threading.enumerate() if t.name=='recovery-age-input'])
