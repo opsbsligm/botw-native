@@ -101,9 +101,9 @@ bool sw_warmup_wait_needed(void) {
 }
 
 bool sw_warmup_wait(int ms, float *done) {
-    *done = shader_precompile_progress(&g_pc) * 1000;
+    *done = shader_precompile_progress(&g_pc);
     if (*done < 1) SDL_Delay(ms);
-    return atomic_load(&g_running);
+    return !atomic_load(&g_running);
 }
 
 void sw_warmup_cancel(void) {
@@ -117,7 +117,7 @@ void sw_warmup_cancel(void) {
 #else  // (Metal compiles its own shaders: nothing to warm)
 void sw_warmup_frame(void) {}
 bool sw_warmup_wait_needed(void) { return false; }
-bool sw_warmup_wait(int, float *done) { *done = 1000; return true; }
+bool sw_warmup_wait(int, float *done) { *done = 1; return true; }
 void sw_warmup_cancel(void) {}
 #endif
 
