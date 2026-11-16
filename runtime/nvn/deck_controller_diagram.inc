@@ -95,6 +95,17 @@ static bool deck_diagram_enabled(void) {
     return g_settings.button_icons==ICONS_DECK ||
         (g_settings.button_icons==ICONS_AUTO && input_pad_family()==3);
 }
+// A matched diagram that we deliberately leave alone is otherwise invisible in
+// the log, so report the reason once per cause. Tells "art swapped" apart from
+// "art kept because the feature is off" and "art kept because the font is gone".
+static void deck_skip_reason(const char *art,uint32_t w,uint32_t h) {
+    static const char *seen[2];
+    const char *reason=!deck_diagram_enabled() ? "icons off/auto-without-Deck-family"
+                                              : "font not loaded";
+    for(int i=0;i<2;i++) if(seen[i] && !strcmp(seen[i],reason)) return;
+    for(int i=0;i<2;i++) if(!seen[i]) { seen[i]=reason; break; }
+    LOG("[glyphs] %s %ux%u matched but kept as-is: %s\n",art,w,h,reason);
+}
 static void deck_crop_rg8(const uint8_t *art,uint32_t sh,uint8_t *lin,uint32_t row,
                           uint32_t w,uint32_t h,int sx,int sy,int dy) {
     int left=sx<0?-sx:0,source_left=sx<0?0:sx;
@@ -123,7 +134,7 @@ static bool deck_small_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *li
     int index=-1;
     for(int i=0;i<9;i++) if(identities[i]==hash && w==(i<5?188u:228u)) index=i;
     if(index<0) return false;
-    if(!deck_diagram_enabled() || !font_ready()) return true;
+    if(!deck_diagram_enabled() || !font_ready()) { deck_skip_reason("SDK7 tutorial closeup",w,h); return true; }
     bool shoulder=index==0||index==1||index==5||index==6;
     uint32_t sh=shoulder?100:288;
     uint8_t *art=malloc(576u*sh*2);
@@ -148,7 +159,7 @@ static bool deck_controller_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_
     uint64_t hash=0xcbf29ce484222325ull;
     for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
     if(hash!=(h==288?0x8b42a6ff21f5dea4ull:0x6e2b71b7ed623592ull)) return false;
-    if(!deck_diagram_enabled()||!font_ready()) return true;
+    if(!deck_diagram_enabled()||!font_ready()) { deck_skip_reason("SDK7 pad diagram",w,h); return true; }
     deck_draw(lin,row,w,h);
     LOG("[glyphs] SDK7 Steam Deck diagram %ux%u: matched ABXY, sticks, touchpads, physical ABXY, L1/R1/L2/R2\n",w,h);
     return true;
