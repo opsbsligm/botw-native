@@ -8,11 +8,26 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import resource
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# The production host claims the whole guest window before main runs (the constructor in
+# runtime/main.c), and the kernel counts that reservation against RLIMIT_DATA even though it
+# is MAP_NORESERVE. Deriving the cap from the same header the host uses keeps the fixture
+# bound meaningful if the address layout ever moves.
+def guest_window_bytes():
+    text = (ROOT/'runtime/rt.h').read_text()
+    def constant(name):
+        found = re.search(r'#define\s+' + name + r'\s+0x([0-9a-fA-F]+)ull', text)
+        if not found: raise ValueError('Missing ' + name + ' in runtime/rt.h')
+        return int(found.group(1), 16)
+    lo, hi = constant('GUEST_LO'), constant('GUEST_HI')
+    if hi <= lo: raise ValueError('Invalid guest window in runtime/rt.h')
+    return hi - lo
 
 FIXTURE = r'''
 #include "gamelib.h"
@@ -43,8 +58,11 @@ const uint32_t game_site_count=1;
 
 
 def limits():
+    # The inspected process reserves the guest window, so the data cap has to cover it plus
+    # headroom for this fixture's own libraries; anything past that still fails the case.
+    ceiling = guest_window_bytes() + 2 * 1024**3
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_DATA, (512 * 1024**2, 512 * 1024**2))
+    resource.setrlimit(resource.RLIMIT_DATA, (ceiling, ceiling))
     resource.setrlimit(resource.RLIMIT_CPU, (15, 15))
 
 
