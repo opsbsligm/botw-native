@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "gamelib.h"
+#include "gamelib_verify.h"
 #include "mods.h"
 #include "paths.h"
 #include "nvn/maxwell/shader.h"
@@ -331,6 +332,31 @@ bool launcher_game_ready(const char *root);
 bool launcher_config_key_held(void);  // (macOS: Option held while the app opens)
 
 int main(int argc, char **argv) {
+    // Keep inspection before platform/UI/data-root initialization. The normal
+    // loader resolves all real host exports, but no guest code or saves run.
+    if (argc > 1 && !strcmp(argv[1], "--verify-code")) {
+        if (argc != 3) {
+            fprintf(stderr, "usage: savagewind --verify-code /absolute/path/swgame.so\n");
+            return 64;
+        }
+        char *library = realpath(argv[2], NULL);
+        if (!library) {
+            fprintf(stderr, "[verify-code] code library does not resolve\n");
+            return 2;
+        }
+        char why[512];
+        bool valid = gamelib_verify_file(library, why, sizeof why);
+        free(library);
+        if (!valid) {
+            fprintf(stderr, "[verify-code] %s\n", why);
+            return 2;
+        }
+        const GameLibTables *tables = gamelib_tables();
+        printf("{\"schema\":1,\"kind\":\"game-code-metadata\",\"abi\":%u,"
+               "\"id\":\"%s\",\"modules\":%u,\"sites\":%u}\n",
+               tables->abi, gamelib_id(), *tables->nmodules, *tables->nsites);
+        return 0;
+    }
     plat_init();
 #ifdef _WIN32
     setvbuf(stderr, NULL, _IONBF, 0);  // the Windows CRT treats _IOLBF as full buffering

@@ -1,5 +1,6 @@
 // Loads the recompiled game code library (runtime/gamelib.h).
 #include "gamelib.h"
+#include "gamelib_verify.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -240,6 +241,29 @@ bool gamelib_load(const char *game_dir, char *why, size_t why_size) {
     }
     if (!g_tables && why) snprintf(why, why_size, "%s", g_error);
     return g_tables != NULL;
+}
+
+bool gamelib_verify_file(const char *path, char *why, size_t why_size) {
+    const char *cpu = gamelib_cpu_problem();
+    const GameLibTables *tables = NULL;
+    if (!path || !*path || g_tables)
+        snprintf(g_error, sizeof g_error, "inspection needs one file and a fresh process");
+    else if (cpu)
+        snprintf(g_error, sizeof g_error, "this build requires %s", cpu);
+    else if (!id_matches(path))
+        snprintf(g_error, sizeof g_error, "code library sidecar is missing or mismatched");
+    else if ((tables = open_lib(path))) {
+        if (!tables->modules || !tables->nmodules || !*tables->nmodules ||
+            *tables->nmodules > 32 || !tables->version || !tables->sites ||
+            !tables->nsites || *tables->nsites > 1024)
+            snprintf(g_error, sizeof g_error, "invalid code library metadata");
+        else if (take_sites(tables)) {
+            g_tables = tables;
+            return true;
+        }
+    }
+    if (why && why_size) snprintf(why, why_size, "%s", g_error);
+    return false;
 }
 
 const GameLibTables *gamelib_tables(void) { return g_tables; }
