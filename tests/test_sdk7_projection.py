@@ -33,21 +33,29 @@ class ProjectionAot(unittest.TestCase):
         self.exefs.mkdir()
         self.sites = {name: (0x40 + i * 8, word)
                       for i, (name, (_, word)) in enumerate(profile.PROJECTION_SITES.items())}
+        self.camera_offsets = tuple(0x40 + (len(self.sites) + i) * 8 for i in range(3))
         pins = {}
         guards = []
         camera_guards = []
         for index, name in enumerate(('main', 'subsdk0', 'sdk')):
             raw = bytearray(decode_nso(module(name, 0x1000, 0x1000, 0x1000,
-                                             9 if name == 'main' else 1, [], 0x50 + index)[0]).data)
+                                             len(self.sites) + len(self.camera_offsets)
+                                             if name == 'main' else 1, [], 0x50 + index)[0]).data)
             if name == 'main':
                 raw[0x40:0x60] = bytes.fromhex(profile.BUILD_ID).ljust(32, b'\0')
+                text_at, text_base, text_size = struct.unpack_from('<III', raw, 0x10)
+                self.assertEqual(text_base, 0)
                 for offset, word in self.sites.values():
                     body = struct.pack('<II', word, RET)
+                    self.assertLessEqual(offset + len(body), text_size)
                     raw[0x100 + offset:0x108 + offset] = body
                     guards.append((offset, offset + 8, hashlib.sha256(body).hexdigest()))
-                for camera_index, offset in enumerate((0x200, 0x210, 0x220)):
+                # Allocate actual exported text functions; slicing beyond text
+                # can otherwise overwrite another segment without extending it.
+                for camera_index, offset in enumerate(self.camera_offsets):
                     body = struct.pack('<II', 0xd2800000 | ((camera_index + 1) << 5), RET)
-                    raw[0x100 + offset:0x108 + offset] = body
+                    self.assertLessEqual(offset + len(body), text_size)
+                    raw[text_at + offset:text_at + offset + len(body)] = body
                     camera_guards.append((offset, offset + 8, hashlib.sha256(body).hexdigest()))
                 for segment in range(3):
                     file_at, _, size = struct.unpack_from('<III', raw, 0x10 + segment * 0x10)
@@ -70,7 +78,7 @@ class ProjectionAot(unittest.TestCase):
 
     def test_camera_context_and_metadata_changes_cannot_generate_hooks(self):
         m = self.module()
-        m.nso.image[0x204] ^= 1
+        m.nso.image[self.camera_offsets[0] + 4] ^= 1
         with self.assertRaisesRegex(ValueError, 'camera event: context hash'):
             profile.projection_table(m)
         m = self.module()
@@ -102,7 +110,7 @@ class ProjectionAot(unittest.TestCase):
         for offset, _ in self.sites.values():
             with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, '保留'):
                 apply_patches(decode_nso(raw), [Patch(0x100 + offset + 4, b'\0')], ranges)
-        for offset in (0x200, 0x210, 0x220):
+        for offset in self.camera_offsets:
             with self.subTest(camera_context=offset), self.assertRaisesRegex(ValueError, '保留'):
                 apply_patches(decode_nso(raw), [Patch(0x100 + offset + 4, b'\0')], ranges)
 
