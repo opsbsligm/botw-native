@@ -21,7 +21,7 @@ bool sw_warmup_available(void);
 void sw_warmup_frame(void);
 
 // The pre-warm's first frame that looks like gameplay (device.c pso_wait): whether this frame waits for the
-// warm-up (only with SAVAGEWIND_SHADER_WARMUP=2), and the wait itself (done: 0..1000; the call returns true when
+// warm-up (only with SAVAGEWIND_SHADER_WARMUP=2), and the wait itself (done: 0..1; the call returns true when
 // it may go on).
 bool sw_warmup_wait_needed(void);
 bool sw_warmup_wait(int ms, float *done);

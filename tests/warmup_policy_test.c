@@ -15,7 +15,26 @@
 _Atomic uint64_t sw_renderer_generation = 1;
 const char *g_romfs_dir = "/tmp/romfs";
 uint64_t maxwell_gmem_base, maxwell_gmem_size;
+static _Atomic int test_pso_polls, test_pso_progress, test_pso_done;
+static _Atomic uint64_t test_ticks;
+static uint64_t total_frames;
+Uint64 SDL_GetTicksNS(void) { return atomic_fetch_add(&test_ticks, 200000000ULL) + 200000000ULL; }
+static bool vk_prewarm(void) { return false; }
+static bool vk_pso_wait(int ms, float *done) { (void)ms; *done=1; return true; }
+static void present_progress(float done) {
+    assert(done >= 0 && done <= 1);  // the real renderer uses this directly as a fraction of the bar width
+    atomic_fetch_add(&test_pso_progress, 1);
+}
+// Appended from device.c by the test launcher, with the GPU calls above stubbed.
+static uint64_t pso_wait(void);
+static void *test_renderer_wait(void *unused) {
+    (void)unused;
+    pso_wait();
+    atomic_store(&test_pso_done, 1);
+    return NULL;
+}
 void SDL_Delay(Uint32 ms) {  // (a real block: the no-op stub turns the poll loops below into CPU spins)
+    if (ms == 100) atomic_fetch_add(&test_pso_polls, 1);
     struct timespec t = { 0, 1000000L };  // 1ms
     nanosleep(&t, NULL);
 }
@@ -34,6 +53,8 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
     atomic_fetch_add(&test_calls, 1);
     atomic_store(&test_running, 1);
     atomic_store(&p->state, SP_COMPILING);
+    atomic_store(&p->total, 100);
+    atomic_store(&p->done, 50);  // force an in-progress fraction, so an erroneous 0..1000 scale cannot pass
     atomic_store(&test_parking, 1);  // (the test holds this run: it waits here until it says otherwise)
     while (!atomic_load(&test_release) && !atomic_load(&p->cancel)) SDL_Delay(1);  // (the engine sees a cancel in its compile)
     atomic_store(&test_parking, 0);
@@ -80,6 +101,8 @@ int main(int argc, char **argv) {
     wait_running(1);
     atomic_store(&test_release, 1);
     wait_done();
+    float complete = -1;
+    assert(sw_warmup_wait(0, &complete) && complete == 1);
     // 2. ... and it does not start again in the same boot, frame after frame
     for (int i = 0; i < 10; i++) sw_warmup_frame();
     wait_calls(1);
@@ -123,12 +146,19 @@ int main(int argc, char **argv) {
     atomic_store(&test_release, 0);
     if (forced == 2) {
         assert(sw_warmup_wait_needed());
-        float done = -1;
-        assert(sw_warmup_wait(1, &done));  // (the run is still parked: the first frame of the boot waits on it)
+        pthread_t renderer;
+        assert(pthread_create(&renderer, NULL, test_renderer_wait, NULL) == 0);
+        // The engine remains parked. The actual pso_wait caller must keep polling and draw a valid progress
+        // bar; a premature 'completed' return instead sets test_pso_done and fails this handshake.
+        for (int i=0; i<2000 && !atomic_load(&test_pso_done) && !atomic_load(&test_pso_progress); i++) SDL_Delay(1);
+        assert(!atomic_load(&test_pso_done));
+        assert(atomic_load(&test_pso_polls) >= 2 && atomic_load(&test_pso_progress) > 0);
         atomic_store(&test_release, 1);
-        while (sw_warmup_wait(1, &done)) assert(done >= 0 && done <= 1000);
+        assert(pthread_join(renderer, NULL) == 0);
+        assert(atomic_load(&test_pso_done));
     } else {
         assert(!sw_warmup_wait_needed());
+        assert(pso_wait() == 0);  // the normal background mode never blocks the rendering caller
         atomic_store(&test_release, 1);
     }
     wait_done();
