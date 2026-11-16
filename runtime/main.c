@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "gamelib.h"
 #include "gamelib_verify.h"
@@ -339,6 +342,14 @@ int main(int argc, char **argv) {
             fprintf(stderr, "usage: savagewind --verify-code /absolute/path/swgame.so\n");
             return 64;
         }
+#ifdef __linux__
+        // Pipe-based core handlers can ignore RLIMIT_CORE. Disable dumps in
+        // this inspection process before loading even library constructors.
+        if (prctl(PR_SET_DUMPABLE, 0L, 0L, 0L, 0L) != 0) {
+            fprintf(stderr, "[verify-code] cannot disable diagnostic dumps\n");
+            return 2;
+        }
+#endif
         char *library = realpath(argv[2], NULL);
         if (!library) {
             fprintf(stderr, "[verify-code] code library does not resolve\n");

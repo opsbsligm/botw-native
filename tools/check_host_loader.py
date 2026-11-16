@@ -16,6 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r'''
 #include "gamelib.h"
+#include <stdlib.h>
+#include <sys/prctl.h>
+/* Check the actual post-exec host state before any fixture code can fail. */
+__attribute__((constructor)) static void require_nondumpable(void) {
+    if (prctl(PR_GET_DUMPABLE, 0L, 0L, 0L, 0L) != 0) _Exit(9);
+}
 extern volatile int g_fnprof;
 /* The shared object needs a real host export. Calling this guest function is
  * always a failure: metadata inspection must never dispatch guest code. */
@@ -128,6 +134,7 @@ GAMELIB_EXPORT const GameLibTables *swgame_tables(void) {
         check('correct-after-negative-cases', good, 0)
     report = {'schema':1, 'cases':results, 'actual_production_host':True,
               'actual_production_entry_getter':True, 'private_game_inputs':False,
+              'native_dumpability_checked_by_fixture':True,
               'gameplay_validated':False, 'temporary_fixtures_removed':True}
     (work/'logs').mkdir(exist_ok=True)
     (work/'logs/host-loader-verification.json').write_text(json.dumps(report, indent=2)+'\n')
