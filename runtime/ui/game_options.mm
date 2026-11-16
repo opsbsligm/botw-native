@@ -310,7 +310,7 @@ void build_items(void) {
                        [](const Item &, int x) { g_settings.fov = k_fov[x]; }, FOV_DEFAULT_INDEX));
     v.back().value_off = [](const Item &, int x) { return k_fov[x] != 100 && !output_fov_available(); };
     v.back().desc_fn = [](const Item &item) {
-        return gamelib_legacy_sdk7_profile() ? tr("SDK7 camera test. Cutscene protection is not yet available.") : tr(item.desc);
+        return gamelib_legacy_sdk7_profile() ? tr("SDK7 camera test. Cutscene behavior still needs device validation.") : tr(item.desc);
     };
     Item fps = choice(P_VIDEO, "Frame rate", "",
                       [](const Item &) { return N(k_fps); }, fps_label,

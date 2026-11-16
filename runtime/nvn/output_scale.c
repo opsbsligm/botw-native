@@ -23,6 +23,7 @@
 
 #include "../framepace.h"
 #include "../gamelib.h"
+#include "../game_sites.h"
 #include "../hle.h"
 #include "../platform.h"
 #include "../settings.h"
@@ -30,8 +31,6 @@
 
 #define MAX_TEX 16384.0
 #define SCENE_LINES 900.0  // the height of the game's 3D scene targets (docked)
-
-extern bool gamelib_legacy_sdk7_profile(void);
 
 bool output_projection_available(void) {
     const GameLibTables *t = gamelib_tables();
@@ -50,10 +49,11 @@ bool output_projection_available(void) {
 
 bool output_fov_available(void) {
     if (!output_projection_available()) return false;
-    // SDK7's projection hooks are independently guarded. Event/cutscene
-    // detection is not ported, so opt in only for isolated validation for now.
+    // Both projection and event metadata must be present. Device validation
+    // of conversations and cutscenes still requires the isolated opt-in.
     const char *test = getenv("SAVAGEWIND_SDK7_FOV");
-    return !gamelib_legacy_sdk7_profile() || (test && !strcmp(test, "1"));
+    return !gamelib_legacy_sdk7_profile() ||
+           (test && !strcmp(test, "1") && gamelib_sdk7_camera_event_site());
 }
 
 bool output_wide_available(void) {

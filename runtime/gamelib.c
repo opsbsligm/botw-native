@@ -74,12 +74,15 @@ const char *gamelib_cpu_problem(void) {
 GameSites g_site;
 const char *g_game_version = "";
 static bool g_legacy_sdk7;
+static uint64_t g_sdk7_camera_event;
 bool gamelib_legacy_sdk7_profile(void) { return g_legacy_sdk7; }
+uint64_t gamelib_sdk7_camera_event_site(void) { return g_sdk7_camera_event; }
 
 // g_site from the library's sites: every one runtime/game_sites.h names has to be there (the library and this build
 // come from the same tools/game_sites.py, or their GAMELIB_IDs would differ).
 static bool take_sites(const GameLibTables *t) {
     g_legacy_sdk7 = false;
+    g_sdk7_camera_event = 0;
     // This port keeps the original game's pacing and menus; cross-version sites are unavailable.
     if (!strcmp(t->version, "1.6.0") && *t->nmodules == 3 &&
         !strcmp(t->modules[0].name, "main") &&
@@ -87,6 +90,22 @@ static bool take_sites(const GameLibTables *t) {
         memset(&g_site, 0, sizeof g_site);
         g_site.main_data = t->modules[0].base + 0x2a6d000;
         g_site.main_end = t->modules[0].base + t->modules[0].size;
+        // Older libraries remain usable. Missing, duplicate or mismatched
+        // optional metadata disables only the experimental camera path.
+        uint64_t want = t->modules[0].base + 0x2cc56d8;
+        unsigned matches = 0;
+        bool valid = t->modules[0].size >= 0x2cc56e0 &&
+                     t->modules[0].base <= UINT64_MAX - t->modules[0].size &&
+                     want >= g_site.main_data && want <= g_site.main_end &&
+                     g_site.main_end - want >= 8;
+        if (t->nsites && *t->nsites > 1024) valid = false;
+        if (valid && t->sites && t->nsites) for (uint32_t i = 0; i < *t->nsites; i++) {
+            if (!t->sites[i].name) { valid = false; continue; }
+            if (strcmp(t->sites[i].name, "sdk7_camera_event_mgr")) continue;
+            matches++;
+            valid = valid && t->sites[i].addr == want;
+        }
+        if (valid && matches == 1) g_sdk7_camera_event = want;
         g_game_version = t->version;
         g_legacy_sdk7 = true;
         return true;

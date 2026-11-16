@@ -6,8 +6,10 @@
 Settings g_settings;
 static bool legacy = true, event;
 static const GameLibTables *loaded;
+static uint64_t camera_event_site;
 const GameLibTables *gamelib_tables(void) { return loaded; }
 bool gamelib_legacy_sdk7_profile(void) { return legacy; }
+uint64_t gamelib_sdk7_camera_event_site(void) { return camera_event_site; }
 bool framepace_title_ui(void) { return false; }
 bool framepace_loading_ui(void) { return false; }
 bool framepace_menu_ui(void) { return false; }
@@ -52,6 +54,8 @@ int main(void) {
     rt_persp((uint64_t)(uintptr_t)camera, &t, &a);
     assert(t == original_t && a == original_a);
     setenv("SAVAGEWIND_SDK7_FOV", "1", 1);
+    assert(!output_fov_available());  // Old libraries have no guarded event slot.
+    camera_event_site = 0x7002cc56d8;
     assert(output_fov_available());
     output_scale(1280, 800, true, &out);
     rt_persp((uint64_t)(uintptr_t)camera, &t, &a);
@@ -68,6 +72,10 @@ int main(void) {
     rt_persp((uint64_t)(uintptr_t)camera, &t, &a);
     assert(t == original_t && a == original_a);  // HUD/model camera unchanged.
 
+    event = true;
+    output_scale(1280, 720, true, &out);
+    assert(g_fov == 1);  // The SDK7 camera also restores framing during events.
+    event = false;
     legacy = false;
     assert(output_wide_available() && antialias_available(AA_TAA));
     assert(upscaler_available(UPSCALE_FSR3) && rt_jitter_on());

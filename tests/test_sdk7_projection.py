@@ -35,6 +35,7 @@ class ProjectionAot(unittest.TestCase):
                       for i, (name, (_, word)) in enumerate(profile.PROJECTION_SITES.items())}
         pins = {}
         guards = []
+        camera_guards = []
         for index, name in enumerate(('main', 'subsdk0', 'sdk')):
             raw = bytearray(decode_nso(module(name, 0x1000, 0x1000, 0x1000,
                                              9 if name == 'main' else 1, [], 0x50 + index)[0]).data)
@@ -44,6 +45,10 @@ class ProjectionAot(unittest.TestCase):
                     body = struct.pack('<II', word, RET)
                     raw[0x100 + offset:0x108 + offset] = body
                     guards.append((offset, offset + 8, hashlib.sha256(body).hexdigest()))
+                for camera_index, offset in enumerate((0x200, 0x210, 0x220)):
+                    body = struct.pack('<II', 0xd2800000 | ((camera_index + 1) << 5), RET)
+                    raw[0x100 + offset:0x108 + offset] = body
+                    camera_guards.append((offset, offset + 8, hashlib.sha256(body).hexdigest()))
                 for segment in range(3):
                     file_at, _, size = struct.unpack_from('<III', raw, 0x10 + segment * 0x10)
                     raw[0xa0 + segment * 32:0xc0 + segment * 32] = hashlib.sha256(raw[file_at:file_at + size]).digest()
@@ -52,13 +57,29 @@ class ProjectionAot(unittest.TestCase):
         for patch in [mock.patch.dict(profile.PINS, pins, clear=True),
                       mock.patch.object(profile, 'PROJECTION_SITES', self.sites),
                       mock.patch.object(profile, 'PROJECTION_FUNCTIONS', tuple(guards)),
+                      mock.patch.object(profile, 'CAMERA_EVENT_GUARDS', tuple(camera_guards)),
+                      mock.patch.object(profile, 'CAMERA_EVENT_OFFSET', 0x2500),
                       mock.patch.object(legacy_clock, 'GUARDS', {})]:
             patch.start()
             self.addCleanup(patch.stop)
 
     def module(self):
-        return SimpleNamespace(nso=Nso(self.exefs / 'main'), base=profile.MAIN_BASE,
-                               sites=profile.projection_sites())
+        nso = Nso(self.exefs / 'main')
+        return SimpleNamespace(nso=nso, base=profile.MAIN_BASE,
+                               sites={**profile.projection_sites(), **profile.camera_event_sites(nso)})
+
+    def test_camera_context_and_metadata_changes_cannot_generate_hooks(self):
+        m = self.module()
+        m.nso.image[0x204] ^= 1
+        with self.assertRaisesRegex(ValueError, 'camera event: context hash'):
+            profile.projection_table(m)
+        m = self.module()
+        m.sites.pop('sdk7_camera_event_mgr')
+        with self.assertRaisesRegex(ValueError, 'camera event: metadata'):
+            profile.projection_table(m)
+        with mock.patch.object(profile, 'CAMERA_EVENT_OFFSET', 0x2501), \
+                self.assertRaisesRegex(ValueError, 'singleton location'):
+            profile.camera_event_sites(m.nso)
 
     def test_changed_method_or_missing_site_cannot_generate_hooks(self):
         m = self.module()
@@ -81,6 +102,9 @@ class ProjectionAot(unittest.TestCase):
         for offset, _ in self.sites.values():
             with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, '保留'):
                 apply_patches(decode_nso(raw), [Patch(0x100 + offset + 4, b'\0')], ranges)
+        for offset in (0x200, 0x210, 0x220):
+            with self.subTest(camera_context=offset), self.assertRaisesRegex(ValueError, '保留'):
+                apply_patches(decode_nso(raw), [Patch(0x100 + offset + 4, b'\0')], ranges)
 
     @unittest.skipUnless(sys.platform == 'linux', 'Production Linux toolchain')
     def test_all_nine_hooks_compile_and_update_only_the_expected_registers(self):
@@ -92,6 +116,7 @@ class ProjectionAot(unittest.TestCase):
         layout = (generated / 'layout.c').read_text()
         for name in self.sites:
             self.assertIn('"' + name + '"', layout)
+        self.assertIn('"sdk7_camera_event_mgr"', layout)
         # Stubs deliberately change each input differently. Swapped registers,
         # lost upper vector bits, or an untouched original load will fail.
         harness = '''#include "cpu.h"

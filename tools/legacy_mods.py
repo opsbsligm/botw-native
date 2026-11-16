@@ -102,8 +102,8 @@ def reserved_ranges(raw, name, hle_symbols):
             end = value + size if size else next((a for a in functions if a > value), sum(nso.text))
             add(value, end - value)
     if name == 'main':
-        from legacy_sdk7 import PROJECTION_FUNCTIONS
-        for start, end, _ in PROJECTION_FUNCTIONS:
+        from legacy_sdk7 import PROJECTION_FUNCTIONS, CAMERA_EVENT_GUARDS
+        for start, end, _ in (*PROJECTION_FUNCTIONS, *CAMERA_EVENT_GUARDS):
             add(start, end - start)
         for offset in GUARDS:
             add(offset, 4)

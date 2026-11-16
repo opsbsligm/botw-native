@@ -48,7 +48,8 @@ class LegacyModIntegration(unittest.TestCase):
         self.addCleanup(guards.stop)
         # This original miniature NSO contains no projection methods. Keep its
         # profile local to this test rather than bypassing production guards.
-        for attribute, value in [('PROJECTION_FUNCTIONS', ()), ('PROJECTION_SITES', {})]:
+        for attribute, value in [('PROJECTION_FUNCTIONS', ()), ('PROJECTION_SITES', {}),
+                                 ('CAMERA_EVENT_GUARDS', ()), ('CAMERA_EVENT_OFFSET', 0x2500)]:
             projection = mock.patch.object(legacy_sdk7, attribute, value)
             projection.start()
             self.addCleanup(projection.stop)

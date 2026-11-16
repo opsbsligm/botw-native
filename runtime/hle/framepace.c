@@ -83,13 +83,21 @@ static bool in_menu(void) {
 // An event is running: a cutscene, a talk, an item fanfare (ksys::evt::Manager [event_mgr]: its active event at
 // +0x1d2b8, as hasActiveEvent, 1.8.2 0x7000ffa208, reads it; the time of day stands still meanwhile). Some of their
 // waits count frames: the new game's opening gave Link control 2 s early at 60 fps, 3 s at 120.
-static bool in_event(void) {
-    if (!g_site.event_mgr) return false;
-    uint64_t evt = *(uint64_t *)(uintptr_t)g_site.event_mgr;
+static bool event_at(uint64_t site) {
+    if (!site) return false;
+    uint64_t evt = *(uint64_t *)(uintptr_t)site;
     return evt && *(uint64_t *)(uintptr_t)(evt + 0x1d2b8);
 }
 
-bool framepace_in_event(void) { return in_event(); }
+static bool in_event(void) { return event_at(g_site.event_mgr); }
+
+bool framepace_in_event(void) {
+    if (!gamelib_legacy_sdk7_profile()) return in_event();
+    // The verified SDK7 slot is exclusive to the opt-in camera experiment.
+    // Keep the original SDK7 frame limiter and all default paths unchanged.
+    const char *test = getenv("SAVAGEWIND_SDK7_FOV");
+    return test && !strcmp(test, "1") && event_at(gamelib_sdk7_camera_event_site());
+}
 
 // The game's UI screen `id` exists (the screen manager's array; ids as runtime/ui/game_options.mm uses them)
 static bool screen_up(uint32_t id) {
