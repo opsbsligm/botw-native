@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 bool gamelib_legacy_sdk7_profile(void);
+// Optional, separately guarded SDK7 camera metadata. Never used for FPS policy.
+uint64_t gamelib_sdk7_camera_event_site(void);
 
 // name (as in tools/game_sites.py) and what is there
 #define GAME_SITES(X)                                                                                                  \

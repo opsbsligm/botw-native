@@ -109,7 +109,7 @@ void control_bar_draw(float) {
              dirty|=nd_ui_choice("##fov",&fi,fnames,9);g_settings.fov=fov[fi];}
             ImGui::EndDisabled();
             if(!output_fov_available()) ImGui::TextWrapped("%s",t("Field of view needs validated camera and cutscene support for this game version.","此版本视野调整尚待完成相机与过场验证。"));
-            else if(gamelib_legacy_sdk7_profile()) ImGui::TextWrapped("%s",t("Experimental camera test; cutscenes keep the selected field of view too.","相机实验模式：过场也会使用所选视野。"));
+            else if(gamelib_legacy_sdk7_profile()) ImGui::TextWrapped("%s",t("Experimental camera test; event framing is connected, cutscenes need device validation.","相机实验：已接入事件状态，过场效果待实机验证。"));
             ImGui::TextWrapped(t("Backend anti-aliasing: %s\nRender scale: %.2fx","后端抗锯齿：%s\n当前渲染比例：%.2f 倍"),aa[std::clamp(rt_antialias(),0,2)],upscale_factor());
             if(ImGui::TreeNode(t("Window size / capabilities","窗口尺寸与能力说明"))) {
                 nd_ui_label(t("Window size","窗口尺寸"));

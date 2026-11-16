@@ -36,6 +36,27 @@ PROJECTION_SITES = {
     'frustum_tb1': (0x1272018, 0x2d540c02),
 }
 
+# Three independent original callers load this singleton and its active event
+# at +0x1d2b8. Keep their complete local contexts, including the null checks,
+# guarded against code mods. This is camera evidence, not a new pacing profile.
+CAMERA_EVENT_OFFSET = 0x2cc56d8
+CAMERA_EVENT_GUARDS = (
+    (0x47440, 0x47470, '525e5cffd95293e497f037fa4f1f9248c1f7473977e54e78b3ebb09c5c4acfed'),
+    (0x49744, 0x49774, '0b3ccdb852f9e271dc854311c7ffefe18ad3dbeb6b4265b04e4e4048474b1b36'),
+    (0x98480, 0x984b0, 'cf214d050499f5d9316412e9c46b1a065c698c67615f06beb6c8709ecefd0bb9'),
+)
+
+
+def camera_event_sites(nso):
+    if nso.build_id != BUILD_ID or CAMERA_EVENT_OFFSET % 8 or \
+            not nso.data[0] <= CAMERA_EVENT_OFFSET <= nso.size - 8:
+        raise ValueError('SDK7 camera event: invalid module or singleton location')
+    for start, end, expected in CAMERA_EVENT_GUARDS:
+        if not nso.text[0] <= start < end <= sum(nso.text) or \
+                hashlib.sha256(nso.image[start:end]).hexdigest() != expected:
+            raise ValueError('SDK7 camera event: context hash mismatch')
+    return {'sdk7_camera_event_mgr': MAIN_BASE + CAMERA_EVENT_OFFSET}
+
 
 def projection_sites():
     return {name: MAIN_BASE + offset for name, (offset, _) in PROJECTION_SITES.items()}
@@ -47,6 +68,9 @@ def projection_table(module):
     nso = module.nso
     if module.base != MAIN_BASE or nso.build_id != BUILD_ID:
         raise ValueError('SDK7 projection: unexpected module identity')
+    for name, address in camera_event_sites(nso).items():
+        if module.sites.get(name) != address:
+            raise ValueError('SDK7 camera event: metadata mismatch')
     for start, end, expected in PROJECTION_FUNCTIONS:
         if not nso.text[0] <= start < end <= sum(nso.text) or \
                 hashlib.sha256(nso.image[start:end]).hexdigest() != expected:
@@ -79,13 +103,12 @@ def verify_main(path, base, build_id, *, raw=None):
     if base != MAIN_BASE or len(claimed) > 32 or claimed.ljust(32, b'\0') != expected_id:
         raise ValueError('SDK7 profile: unexpected main base or build ID')
     if raw is None:
-        with path.open('rb') as stream:
-            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-    else:
-        digest = hashlib.sha256(raw).hexdigest()
+        raw = path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
     if digest != PINS['main']:
         raise ValueError('SDK7 profile: original main hash does not match')
-    return '1.6.0', projection_sites()
+    from nso import Nso
+    return '1.6.0', {**projection_sites(), **camera_event_sites(Nso(path, raw=raw))}
 
 
 def verify_exefs(exefs, names):
