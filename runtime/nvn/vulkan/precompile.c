@@ -59,6 +59,29 @@ typedef struct {
     pthread_cond_t cond;
 } Work;
 
+// A partially created pool can drain the shared queue. If even the first thread cannot be created, the
+// calling warm-up thread drains it instead; never join an uninitialized pthread_t or publish unfinished work.
+static int run_precompile_workers(int requested, void *(*fn)(void *), void *arg) {
+    pthread_t threads[32];
+    int created = 0;
+    if (requested < 1) requested = 1;
+    if (requested > 32) requested = 32;
+    for (; created < requested; created++) {
+        int error = pthread_create(&threads[created], NULL, fn, arg);
+        if (error) {
+            LOG("[precompile] worker creation failed after %d threads: %s; continuing with available workers\n",
+                created, strerror(error));
+            break;
+        }
+    }
+    if (!created) {
+        fn(arg);
+        return 1;
+    }
+    for (int i = 0; i < created; i++) pthread_join(threads[i], NULL);
+    return created;
+}
+
 static void *worker(void *arg) {
     Work *w = arg;
     maxwell_gmem_base = HEAP_BASE;  // (as the game translates: global memory relative to the guest heap)
@@ -338,12 +361,10 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
     int nt = SDL_GetNumLogicalCPUCores();
     if (nt < 1) nt = 1;
     if (nt > 32) nt = 32;
-    pthread_t th[32];
-    for (int i = 0; i < nt; i++) pthread_create(&th[i], NULL, worker, &w);
-    for (int i = 0; i < nt; i++) pthread_join(th[i], NULL);
+    int translation_workers = run_precompile_workers(nt, worker, &w);
     vk_keylog_flush();
     LOG("[precompile] %d translations in %.1f s on %d threads: %d made, %d were cached, %d failed\n", njobs,
-        (SDL_GetTicksNS() - t0) / 1e9, nt, atomic_load(&w.made), atomic_load(&w.cached), atomic_load(&w.failed));
+        (SDL_GetTicksNS() - t0) / 1e9, translation_workers, atomic_load(&w.made), atomic_load(&w.cached), atomic_load(&w.failed));
     // into the pipeline cache: the compute pipelines (their whole state is known: the group size); with graphics
     // pipeline libraries (exec.c), every vertex and fragment shader's libraries, into a cache of their own
     // (cache/vk_precompiled.bin, device.c). Without them, whole pipelines only
@@ -396,8 +417,7 @@ bool shader_precompile_run(ShaderPrecompile *p, const char *romfs) {
         atomic_store(&p->total, nu);
         atomic_store(&p->state, SP_PIPELINES);
         uint64_t tp = SDL_GetTicksNS();
-        for (int i = 0; i < nt; i++) pthread_create(&th[i], NULL, pipe_worker, &w);
-        for (int i = 0; i < nt; i++) pthread_join(th[i], NULL);
+        run_precompile_workers(nt, pipe_worker, &w);
         p->pipelines = atomic_load(&w.built);
         extern void vk_pipeline_cache_save(void);
         vk_pipeline_cache_save();
