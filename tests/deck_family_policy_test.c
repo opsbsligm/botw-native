@@ -9,6 +9,9 @@
 #define _GNU_SOURCE
 #endif
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 
 #include "../runtime/hle/input.c"  // production translation unit; the stubs below keep the real SDL out of the link
@@ -106,6 +109,31 @@ int main(void) {
     // A controller SDL does not classify (non-Xbox/PS type, unknown VID/PID, no Deck name) stays Switch/other.
     set_pad(SDL_GAMEPAD_TYPE_GAMECUBE, 0x05fe, 0x3009, "HORI Fighting Commander");
     assert(input_pad_family() == 0);
+
+    // On a Deck mainboard an unclassified pad keeps the Deck family (the DMI anchor, offline via SAVAGEWIND_DMI_ROOT).
+    {
+        const char *tmp = getenv("TMPDIR");
+        static char root[256];
+        assert(snprintf(root, sizeof root, "%s/nd-dmi-XXXXXX", tmp && *tmp ? tmp : "/tmp") < (int)sizeof root);
+        char *dir = mkdtemp(root);
+        assert(dir);
+        char path[256];
+        assert(snprintf(path, sizeof path, "%s/sys_vendor", dir) < (int)sizeof path);
+        FILE *f = fopen(path, "we");
+        assert(f);
+        assert(fputs("Valve\n", f) >= 0);
+        assert(!fclose(f));
+        assert(setenv("SAVAGEWIND_DMI_ROOT", dir, 1) == 0);
+        set_pad(SDL_GAMEPAD_TYPE_GAMECUBE, 0x05fe, 0x3009, "HORI Fighting Commander");
+        assert(input_pad_family() == 3);
+        // A recognised third-party pad still wins over the machine anchor.
+        set_pad(SDL_GAMEPAD_TYPE_XBOXONE, 0x045e, 0x0b05, "Xbox One Gamepad");
+        assert(input_pad_family() == 1);
+        // The fixture this job created leaves nothing behind.
+        assert(!unlink(path));
+        assert(!rmdir(dir));
+        assert(unsetenv("SAVAGEWIND_DMI_ROOT") == 0);
+    }
 
     // No pad at all: still Switch/other.
     set_pad(0, 0, 0, "HORI Fighting Commander");

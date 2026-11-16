@@ -95,6 +95,26 @@ static bool deck_diagram_enabled(void) {
     return g_settings.button_icons==ICONS_DECK ||
         (g_settings.button_icons==ICONS_AUTO && input_pad_family()==3);
 }
+// Which of the three ways the Deck artwork fails to appear is otherwise
+// invisible here: the feature is off, the font is gone, or the art simply is not
+// the texture we keyed on. Log each cause once, and name a near-miss texture by
+// the hash actually seen so one remote run is enough to key the next release.
+static void deck_skip_reason(const char *art,uint32_t w,uint32_t h,uint64_t seen_hash) {
+    static char seen[4][96];
+    char line[96];
+    if(seen_hash) snprintf(line,sizeof line,"%s %ux%u kept: art differs, hash %016llx",
+                           art,w,h,(unsigned long long)seen_hash);
+    else snprintf(line,sizeof line,"%s %ux%u kept: %s",art,w,h,
+                  !deck_diagram_enabled() ? "icons off/auto-without-Deck-family" : "font not loaded");
+    for(int i=0;i<4;i++) if(!strcmp(seen[i],line)) return;   // already reported
+    for(int i=0;i<4;i++) if(!seen[i][0]) {                    // first time: note and report
+        snprintf(seen[i],sizeof seen[i],"%s",line);
+        LOG("[glyphs] %s\n",line);
+        return;
+    }
+    // Past four distinct causes the sheet repeats every upload; stay quiet
+    // rather than fill the log, since the causes that matter are already named.
+}
 static void deck_crop_rg8(const uint8_t *art,uint32_t sh,uint8_t *lin,uint32_t row,
                           uint32_t w,uint32_t h,int sx,int sy,int dy) {
     int left=sx<0?-sx:0,source_left=sx<0?0:sx;
@@ -122,8 +142,8 @@ static bool deck_small_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_t *li
     for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
     int index=-1;
     for(int i=0;i<9;i++) if(identities[i]==hash && w==(i<5?188u:228u)) index=i;
-    if(index<0) return false;
-    if(!deck_diagram_enabled() || !font_ready()) return true;
+    if(index<0) { deck_skip_reason("SDK7 tutorial closeup",w,h,hash); return false; }
+    if(!deck_diagram_enabled() || !font_ready()) { deck_skip_reason("SDK7 tutorial closeup",w,h,0); return true; }
     bool shoulder=index==0||index==1||index==5||index==6;
     uint32_t sh=shoulder?100:288;
     uint8_t *art=malloc(576u*sh*2);
@@ -147,8 +167,11 @@ static bool deck_controller_diagram(uint32_t format,uint32_t w,uint32_t h,uint8_
     if(format!=0x0d||w!=576||(h!=288&&h!=100)||row<w*2) return false;
     uint64_t hash=0xcbf29ce484222325ull;
     for(uint32_t y=0;y<h;y++) for(uint32_t x=0;x<w*2;x++) hash=(hash^lin[(uint64_t)y*row+x])*0x100000001b3ull;
-    if(hash!=(h==288?0x8b42a6ff21f5dea4ull:0x6e2b71b7ed623592ull)) return false;
-    if(!deck_diagram_enabled()||!font_ready()) return true;
+    if(hash!=(h==288?0x8b42a6ff21f5dea4ull:0x6e2b71b7ed623592ull)) {
+        deck_skip_reason("SDK7 pad diagram",w,h,hash);
+        return false;
+    }
+    if(!deck_diagram_enabled()||!font_ready()) { deck_skip_reason("SDK7 pad diagram",w,h,0); return true; }
     deck_draw(lin,row,w,h);
     LOG("[glyphs] SDK7 Steam Deck diagram %ux%u: matched ABXY, sticks, touchpads, physical ABXY, L1/R1/L2/R2\n",w,h);
     return true;

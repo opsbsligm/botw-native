@@ -939,7 +939,10 @@ static void upload_levels(NvnTexture *t, TexBackend *b, uint32_t level_mask) {
                 glyphs_apply(t->addr, t->pool->storage, t->pool->storage + t->pool->size, t->format, t->width,
                              t->height, lin, l.wb, l.hb))
                 b->glyph_gen = glyphs_generation();
-            if (lv == 0 && layer == 0 && (t->format == 0x01 || t->format == 0x0d) && !linear &&  // (the HUD's button textures, likewise)
+            // The HUD's button textures, likewise. Pitch storage is accepted on the same terms as swizzled:
+            // the hook re-reads these texels and replaces only on an exact content match, so it cannot repaint
+            // an unrelated sheet, and a game that uploads its diagram linearly keeps the Deck artwork.
+            if (lv == 0 && layer == 0 && (t->format == 0x01 || t->format == 0x0d) &&
                 glyphs_apply_layout(t->format, l.w, l.h, lin, row))
                 b->glyph_gen = glyphs_generation();
             if (t->target == 2 && lv == 0 && getenv("SAVAGEWIND_DUMP_TEX3D")) {  // (debugging) 3D texels as uploaded

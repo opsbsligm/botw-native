@@ -361,6 +361,28 @@ int input_last_device(void) { return pad ? last_device : DEVICE_KEYBOARD; }
 // Controller family for the Controls tab labels (runtime/hle/bindings.c): 0 Nintendo / other / none, 1 Xbox, 2 PlayStation.
 // SAVAGEWIND_PAD_TYPE=deck|xbox|playstation|nintendo pretends one is attached (tests).
 static _Atomic int pad_family;
+// This machine is a Steam Deck itself (valve Jupiter/Galileo mainboard), read from DMI rather than from a
+// controller. The Deck's own pad can be absent from the game's view: Steam Input in desktop mode hands SDL an
+// abstracted device, and a keyboard or touch tap before the first pad event would otherwise pick the Switch
+// prompts and the whole control-help diagram. Only the automatic setting uses this; an explicit override wins.
+static int deck_hardware(void) {
+    static int cached = -1;
+    const char *root = getenv("SAVAGEWIND_DMI_ROOT");
+    char path[1024];
+    int override = root && *root;
+    if (cached >= 0 && !override) return cached;  // the production answer is stable; an override re-reads every call
+    if (!override) root = "/sys/class/dmi/id";
+    if (snprintf(path, sizeof path, "%s/sys_vendor", root) >= (int)sizeof path) return override ? 0 : (cached = 0);
+    FILE *f = fopen(path, "re");
+    if (!f) return override ? 0 : (cached = 0);
+    char vendor[64] = {0};
+    size_t read = fread(vendor, 1, sizeof vendor - 1, f);
+    fclose(f);
+    while (read && (vendor[read - 1] == '\n' || vendor[read - 1] == '\r')) vendor[--read] = 0;
+    int deck = strcmp(vendor, "Valve") ? 0 : 1;
+    if (!override) cached = deck;  // only the real machine's answer is stored as final
+    return deck;
+}
 static void note_family(void) {
     int f = 0;
     if (pad) switch (SDL_GetGamepadType(pad)) {
@@ -378,7 +400,17 @@ static void note_family(void) {
         const char *padname = SDL_GetGamepadName(pad);
         if(padname && strstr(padname, "Steam Deck")) f = 3;
     }
+    // The Deck's own hardware is the last anchor: an unrecognised or absent pad must not restyle the prompts to
+    // Switch on the device the Deck artwork was authored for. A recognised Xbox/PlayStation pad keeps its family,
+    // and an explicit SAVAGEWIND_PAD_TYPE or button_icons choice still wins over both.
+    const char *reason = f == 3 ? "deck pad" : f == 1 ? "xbox type" : f == 2 ? "playstation type" : "unclassified";
+    if (f == 0 && deck_hardware()) { f = 3; reason = "deck mainboard"; }
     if (f != pad_family) LOG("[input] button prompts: %s controller\n", f == 3 ? "Steam Deck" : f == 1 ? "Xbox" : f == 2 ? "PlayStation" : "Switch / other");
+    static const char *logged_reason;
+    if (!logged_reason || strcmp(logged_reason, reason)) {
+        LOG("[input] prompt family %d from %s\n", f, reason);
+        logged_reason = reason;
+    }
     pad_family = f;
 }
 int input_pad_family(void) {
