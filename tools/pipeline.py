@@ -43,6 +43,10 @@ def make(work, label, jobs, *args):
         'runtime/cpu.h','runtime/simd.h','runtime/simd_fp.h','runtime/simd_softfma.h',
         'runtime/legacy_clock.h','runtime/gamelib.h','Makefile']))
     host=[p for d in ('rt','imgui','ffx') for p in (out/d).rglob('*.o')]
+    # This small entry embeds GAMELIB_ID, which also hashes generator sources.
+    # Source archives have fixed mtimes: make's timestamps cannot invalidate it
+    # when generator bytes change while the guest ABI remains the same.
+    host.append(out/'obj/tools/gamelib_entry.o')
     state=prepare(out,current,host,list((out/'obj').rglob('*.o')))
     run(work, label, ['make', '-j' + str(jobs), 'B=' + str(out),
         'GEN=' + str(work / 'generated'), 'DEPS=' + os.environ['NATIVE_DEPS'], *args])
