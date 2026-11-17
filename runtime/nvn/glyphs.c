@@ -240,6 +240,16 @@ static void round_label(Canvas *c, Box b, const char *s) {
     cut_text(c, s, b.cx, b.cy, b.s * (strlen(s) > 1 ? 0.36f : 0.5f), b.s * 0.72f);
 }
 
+// A Deck face: the rounded square of the physical button with its letter cut out. The game's own
+// plate is a disc, which describes a Switch and not the control under a thumb, so on Deck the plate
+// takes the button's shape. The footprint stays the disc's bounding box, so a redraw cannot resize
+// a prompt, and the corner radius comes from the same family as the shoulder tab below it.
+static void deck_face(Canvas *c, Box b, const char *s) {
+    float hw = minf(b.w / 2, b.s / 2), hh = b.s / 2;
+    fill(c, box(b.cx, b.cy, hw, hh, minf(b.s * 0.32f, minf(hw, hh))));
+    cut_text(c, s, b.cx, b.cy, b.s * (strlen(s) > 1 ? 0.36f : 0.5f), hw * 2 - b.s * 0.16f);
+}
+
 // A filled rounded tab with its label cut out (shoulders, triggers, other buttons)
 static void tab_label(Canvas *c, Box b, const char *s) {
     float hw = minf(b.w / 2, b.s * 0.56f), hh = b.s * 0.36f;
@@ -429,8 +439,11 @@ static void pad_button(Canvas *c, Box b, int host, bool ps, bool deck) {
     switch (host) {
     case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_EAST: case SDL_GAMEPAD_BUTTON_WEST: case SDL_GAMEPAD_BUTTON_NORTH:
         if (ps) ps_face(c, b, host);
-        else round_label(c, b, host == SDL_GAMEPAD_BUTTON_SOUTH ? "A" : host == SDL_GAMEPAD_BUTTON_EAST ? "B" :
-                               host == SDL_GAMEPAD_BUTTON_WEST ? "X" : "Y");
+        else {
+            const char *label = host == SDL_GAMEPAD_BUTTON_SOUTH ? "A" : host == SDL_GAMEPAD_BUTTON_EAST ? "B" :
+                                host == SDL_GAMEPAD_BUTTON_WEST ? "X" : "Y";
+            if (deck) deck_face(c, b, label); else round_label(c, b, label);
+        }
         return;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: tab_label(c, b, ps || deck ? "L1" : "LB"); return;
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: tab_label(c, b, ps || deck ? "R1" : "RB"); return;
@@ -438,8 +451,10 @@ static void pad_button(Canvas *c, Box b, int host, bool ps, bool deck) {
     case PADB_RTRIGGER: tab_label(c, b, ps || deck ? "R2" : "RT"); return;
     case SDL_GAMEPAD_BUTTON_START: menu_button(c, b, true, ps); return;
     case SDL_GAMEPAD_BUTTON_BACK: menu_button(c, b, false, ps); return;
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK: round_label(c, b, ps || deck ? "L3" : "LS"); return;
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: round_label(c, b, ps || deck ? "R3" : "RS"); return;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+        if (deck) deck_face(c, b, "L3"); else round_label(c, b, ps ? "L3" : "LS"); return;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+        if (deck) deck_face(c, b, "R3"); else round_label(c, b, ps ? "R3" : "RS"); return;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: dpad(c, b, DIR_U); return;
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: dpad(c, b, DIR_D); return;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: dpad(c, b, DIR_L); return;
