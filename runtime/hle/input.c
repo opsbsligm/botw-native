@@ -366,7 +366,7 @@ static _Atomic int pad_family;
 // abstracted device, and a keyboard or touch tap before the first pad event would otherwise pick the Switch
 // prompts and the whole control-help diagram. Only the automatic setting uses this; an explicit override wins.
 static int deck_hardware(void) {
-    static int cached = -1;
+    static _Atomic int cached = -1;  // (input_pad_family answers from any thread: the glyph upload asks for the family)
     const char *root = getenv("SAVAGEWIND_DMI_ROOT");
     char path[1024];
     int override = root && *root;
@@ -419,7 +419,12 @@ int input_pad_family(void) {
         const char *e = getenv("SAVAGEWIND_PAD_TYPE");
         env = !e ? -1 : !strcmp(e, "deck") ? 3 : !strcmp(e, "xbox") ? 1 : !strcmp(e, "playstation") || !strcmp(e, "ps") ? 2 : 0;
     }
-    return env >= 0 ? env : pad_family;
+    if (env >= 0) return env;
+    // note_family() runs on controller events, so the very first frame (the start screen's help art uploads before
+    // any event has been polled) still had family 0 and drew the Switch diagram on the Deck. The mainboard anchor
+    // reads one sysfs file and needs no SDL call, so it is safe to consult here from the upload thread.
+    int f = atomic_load_explicit(&pad_family, memory_order_relaxed);
+    return f == 0 && deck_hardware() ? 3 : f;
 }
 
 void input_handle_event(const SDL_Event *e) {

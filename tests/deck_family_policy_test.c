@@ -138,5 +138,26 @@ int main(void) {
     // No pad at all: still Switch/other.
     set_pad(0, 0, 0, "HORI Fighting Commander");
     assert(input_pad_family() == 0);
+
+    // The first frame asks before any controller event has been polled (the start screen's help art uploads during
+    // the very first render). The mainboard anchor has to answer that question, not only the next event's.
+    {
+        const char *tmp = getenv("TMPDIR");
+        static char root[256];
+        assert(snprintf(root, sizeof root, "%s/nd-dmi2-XXXXXX", tmp && *tmp ? tmp : "/tmp") < (int)sizeof root);
+        char *dir = mkdtemp(root);
+        assert(dir);
+        char path[256];
+        assert(snprintf(path, sizeof path, "%s/sys_vendor", dir) < (int)sizeof path);
+        FILE *f = fopen(path, "we");
+        assert(f);
+        assert(fputs("Valve\n", f) >= 0);
+        assert(!fclose(f));
+        assert(setenv("SAVAGEWIND_DMI_ROOT", dir, 1) == 0);
+        assert(input_pad_family() == 3);  // pad_family is still 0: no note_family() ran since the last set_pad
+        assert(!unlink(path));
+        assert(!rmdir(dir));
+        assert(unsetenv("SAVAGEWIND_DMI_ROOT") == 0);
+    }
     return 0;
 }
