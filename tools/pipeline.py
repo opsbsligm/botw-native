@@ -92,8 +92,14 @@ def main():
     p.add_argument('--jobs', type=int, choices=(1, 2, 3, 4), default=2)
     p.add_argument('--stage', choices=('code', 'assets', 'package', 'all'), default='all')
     p.add_argument('--code-mods', type=Path)
+    p.add_argument('--dump', type=Path, default=Path('/input'),
+                   help='Checked 1.6.0 inputs (exefs, romfs, aoc); a release data/ directory qualifies')
     a = p.parse_args()
     a.work = a.work.resolve()
+    if a.command == 'build':
+        a.dump = a.dump.resolve()
+        if not a.dump.is_dir():
+            raise SystemExit('Input directory is not a directory: ' + str(a.dump))
     a.work.mkdir(parents=True, exist_ok=True)
     (a.work / 'home').mkdir(exist_ok=True)
     from check_toolchain import main as check_toolchain
@@ -104,7 +110,7 @@ def main():
     lock = (a.work / 'build.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     before = source_stamp()
-    dump = Path('/input')
+    dump = a.dump
     receipt = a.work / 'build-complete.json'
     receipt.unlink(missing_ok=True)
     if a.stage in ('code', 'all'):
