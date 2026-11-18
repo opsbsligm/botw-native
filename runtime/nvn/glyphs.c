@@ -243,18 +243,29 @@ static void round_label(Canvas *c, Box b, const char *s) {
 // A Deck face: the rounded square of the physical button with its letter cut out. The game's own
 // plate is a disc, which describes a Switch and not the control under a thumb, so on Deck the plate
 // takes the button's shape. The footprint stays the disc's bounding box, so a redraw cannot resize
-// a prompt, and the corner radius comes from the same family as the shoulder tab below it.
+// a prompt.
+//
+// Two ratios make a plate read as a Deck button rather than a Switch key, and both come from the
+// sibling project's accepted Deck masks (src/gfx/deck_prompt_masks.h, reviewed there against the
+// console's own artwork at the ~40 pixels a prompt occupies on 1280x800), measured as fractions of
+// the plate rather than of the cell, since the game scales the plate: the corner is 9/16 of the
+// plate's half width -- at 0.32 of the plate, 0.64 of the half width, the eye still reads a disc,
+// which is why these prompts looked like the game's own -- and the capital is 16/25 of the plate's
+// height, which keeps about a sixth of the plate clear above and below the widest letter. A pair
+// like "L3" takes the same height and is held inside the plate by the width limit instead.
 static void deck_face(Canvas *c, Box b, const char *s) {
     float hw = minf(b.w / 2, b.s / 2), hh = b.s / 2;
-    fill(c, box(b.cx, b.cy, hw, hh, minf(b.s * 0.32f, minf(hw, hh))));
-    cut_text(c, s, b.cx, b.cy, b.s * (strlen(s) > 1 ? 0.36f : 0.5f), hw * 2 - b.s * 0.16f);
+    fill(c, box(b.cx, b.cy, hw, hh, minf(hw * (9.0f / 16.0f), minf(hw, hh))));
+    cut_text(c, s, b.cx, b.cy, b.s * (16.0f / 25.0f), hw * 2 - b.s * 0.16f);
 }
 
-// A filled rounded tab with its label cut out (shoulders, triggers, other buttons)
+// A filled rounded tab with its label cut out (shoulders, triggers, other buttons). The corner is
+// half the tab's half height, and its capital is 0.74 of the tab's height -- the accepted masks'
+// shoulder plate -- so the six prompts read as one family instead of a heavier plate with a letter in it.
 static void tab_label(Canvas *c, Box b, const char *s) {
     float hw = minf(b.w / 2, b.s * 0.56f), hh = b.s * 0.36f;
-    fill(c, box(b.cx, b.cy, hw, hh, b.s * 0.14f));
-    cut_text(c, s, b.cx, b.cy, b.s * 0.38f, hw * 2 - b.s * 0.18f);
+    fill(c, box(b.cx, b.cy, hw, hh, hh * 0.5f));
+    cut_text(c, s, b.cx, b.cy, hh * 1.48f, hw * 2 - b.s * 0.18f);
 }
 
 // PlayStation face buttons: cross, circle, square, triangle cut out of a filled circle
