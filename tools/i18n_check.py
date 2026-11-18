@@ -23,6 +23,11 @@ SOURCES = sorted(glob.glob(os.path.join(ROOT, 'runtime/ui/*.mm'))) + [
 SKIP_LINE = re.compile(r'\b(LOG|fprintf|printf|getenv|strcmp|strncmp|memcmp|strstr|fopen|file_exists|mkdir|unlink|rt_resource|rt_remove_game_file|'
                        r'PushID|BeginChild|BeginTable|BeginPopup|OpenPopup|IsPopupOpen|InvisibleButton|GetID|Begin)\s*\(|'
                        r'#include|#define|SAVAGEWIND_|//')
+# (the touch sidebar and the Amiibo/Atmosphere panels) carry their translation inline: t("English", "中文") renders
+# one of the two and never reaches tr(), so neither literal is a table key. An empty pair would show nothing in Chinese.
+INLINE_T = re.compile(r'\bt\s*\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\)')
+# a ternary that picks between the two languages itself (menu.mm): neither literal reaches tr()
+LANG_TERNARY = re.compile(r'ui_lang\s*\(\s*\)[^;]{0,160}?\?\s*"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
 def literals(text):
@@ -72,8 +77,35 @@ def literals(text):
     return out
 
 
+def unquote(s):
+    return re.sub(r'\\(.)', lambda m: {'n': '\n', 't': '\t', '"': '"', '\\': '\\', "'": "'", '0': '\0'}.get(m.group(1), '\\' + m.group(1)), s)
+
+
+def inline_t_texts(text):
+    """Texts a source translates itself, so the tables never see them: inline t("en", "zh") pairs and the
+    ui_lang()-guarded "en" : "zh" ternaries (both render one of their two texts, and both skip tr()).
+
+    An empty second text would show nothing in Chinese, so that key still belongs to the tables. Otherwise the pair
+    renders one of its two texts itself (t("512 MiB", "512 MiB") is a label that reads the same in both languages),
+    so the table never sees either of them.
+    """
+    out = []
+    for m in INLINE_T.finditer(text):
+        ls = text.rfind('\n', 0, m.start()) + 1
+        if '//' in text[ls:m.start()] or '/*' in text[ls:m.start()]:
+            continue
+        en, zh = unquote(m.group(1)), unquote(m.group(2))
+        if zh.strip():
+            out += [en, zh]
+    for m in LANG_TERNARY.finditer(text):
+        out += [unquote(m.group(1)), unquote(m.group(2))]
+    return set(out)
+
+
 def looks_like_text(s, in_tr=False):
     if not re.search(r'[A-Za-z]{2}', s) or s.startswith('##') or '###' in s:
+        return False
+    if re.fullmatch(r'%[-+ #0]*[\d.]*[a-zA-Z]x?', s):  # ("%.1fx": a printf format, not a wording)
         return False
     if in_tr and '/' not in s and '\\' not in s:  # (a word passed to tr() is text, however short)
         return True
@@ -93,9 +125,12 @@ def keys():
     for path in SOURCES:
         text = open(path, encoding='utf-8').read()
         lines = text.split('\n')
+        inline_ok = inline_t_texts(text)
+        # an inline pair only proves the text is translated there; the same wording can still be drawn through tr() elsewhere
+        tr_seen = {s for ln, s in literals(text) if 'tr(' in (lines[ln - 1] if ln - 1 < len(lines) else '').split('"')[0]}
         for ln, s in literals(text):
             src = lines[ln - 1] if ln - 1 < len(lines) else ''
-            if SKIP_LINE.search(src.split('"')[0]) or not looks_like_text(s, 'tr(' in src):
+            if SKIP_LINE.search(src.split('"')[0]) or (s in inline_ok and s not in tr_seen) or not looks_like_text(s, 'tr(' in src):
                 continue
             found.setdefault(s, f'{os.path.relpath(path, ROOT)}:{ln}')
     # the colour presets' names (runtime/color_grade.c g_color_presets: shown through tr() by both menus)
@@ -140,9 +175,9 @@ def main():
         missing = [k for k in want if k not in have]
         unused = [k for k in have if k not in want]
         print(f'{lang}: {len(have)} entries, {len(missing)} missing, {len(unused)} unused')
-        for k in missing[:20]:
+        for k in missing[:40]:
             print(f'  missing: {k[:90]!r}  ({want[k]})')
-        for k in unused[:20]:
+        for k in unused[:40]:
             print(f'  unused:  {k[:90]!r}')
         bad |= bool(missing)
     sys.exit(1 if bad else 0)

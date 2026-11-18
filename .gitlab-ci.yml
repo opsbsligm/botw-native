@@ -30,6 +30,7 @@ native-unit:
   image: native-games/toolchain:02b1aa2ee13b00c30b38
   script:
     - python3 tools/check_source.py
+    - python3 tools/i18n_check.py
     - python3 .gitlab/check_dependency_coverage.py --input-only
     - mkdir -p out/public-tests
     - cd out/public-tests
