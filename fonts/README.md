@@ -11,3 +11,4 @@ For the exact look, put a dump from your own console here (Switch system archive
 - `nintendo_ext_003.bfttf`: button glyphs (optional)
 
 `SAVAGEWIND_FONT=<file>` overrides everything (.ttf / .otf / .ttc / .bfttf).
+**字体许可**：回退字体 Hiragino Sans 为 macOS 内置、Arial 为 Adobe 授权，均随系统/环境自带；用户自 Switch 提取的 `nintendo_*` 字体以任天堂许可为准，本仓不重新分发。
